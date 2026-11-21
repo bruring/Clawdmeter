@@ -647,7 +647,18 @@ impl Render for OverviewView {
                     .chain([meter(&t, "Weekly", s.week_pct, s.shown_fable(), reset_text(s.week_resets_at, now, "---"))])
                     .collect()
             };
-            page = page.child(div().flex().flex_col().gap(px(12.)).children(meters));
+            // A weekly-only plan's limit-reset grants (`claude_resets`), in the
+            // card a Codex plan's credits use.
+            let card_w = (f32::from(window.viewport_size().width) - super::SIDEBAR_W).min(super::PAGE_MAX_W)
+                - 2. * super::PAGE_PAD_X;
+            page = page.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(12.))
+                    .children(meters)
+                    .children(s.shown_resets().map(|h| resets_card(&t, h, &s.resets_expiries, card_w - 32.))),
+            );
         }
         if s.accounts.len() >= 2 {
             page = page.child(accounts_card(&t, &s.accounts, &home));

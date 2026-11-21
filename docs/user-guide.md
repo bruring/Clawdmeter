@@ -244,6 +244,16 @@ a drop in usage for a reset (the reset chime, if it's on, and Clawd's
 reaction) and a rise for heavy use. Automatic switching between Claude
 accounts does the same.
 
+**Claude's free limit resets.** With **Show Claude's free limit resets** on
+(Settings, off by default), Clawdmeter reads once a day which limit resets
+Anthropic has granted each account, the ones Claude Code's `/limit-reset`
+uses. A weekly-only account then shows them as Codex's credits are shown:
+the count and each one's end date in a Resets card on the device and the
+Overview, under the meter in the macOS panel, and as a row in the Linux and
+Windows menu. Clawdmeter only reads them; it never uses one. The endpoint
+answers only Claude Code's own User-Agent, so that one call sends it. It's
+read-only, but Anthropic may stop answering it or object to it.
+
 **Every account at a glance.** With two or more accounts, the Overview has
 an **Accounts** card and the tray lists one row per account under the meters.
 Each row shows the account's name, its usage and when its week resets, and
@@ -476,6 +486,7 @@ Everything Clawdmeter sends over the network:
 | `claude -p /usage` | Anthropic, through Claude Code | When the stored sign-in has expired or is refused, or can't be read | None (a Claude Code command, not a message) |
 | `GET chatgpt.com/backend-api/wham/usage` and `…/rate-limit-reset-credits` | OpenAI | Codex accounts only: every 5 or 10 minutes, and the credits at most hourly | None |
 | Hook records (event name, session id, this computer's name, the account and organization ids, alert text), only when `hub_url` is set | Your own hub computer, over plain HTTP with `hub_token` | Each hook event | None |
+| Limit-reset grants, `GET api.anthropic.com/api/oauth/usage?cedar_ember=1&skip_spend=1`, with Claude Code's User-Agent (`claude-cli/<version> (external, cli)`), only with **Show Claude's free limit resets** on | Anthropic | At most once a day per account, right after a successful check | None |
 | GitHub releases (`api.github.com`, `github.com`) | GitHub | Every 6 hours while **Check for updates** is on (an hour after a check that failed). Opening the Flash or Update page also asks GitHub, whatever that setting says. Downloads only when you flash a board or update the app | None |
 
 Nothing else is sent: no telemetry and no account with us. Sign-ins are only
