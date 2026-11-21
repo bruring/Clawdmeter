@@ -294,9 +294,11 @@ void director_set_liveliness(int level) {
     mascot_autonomy(beat == B_HOME && !minimal && t.idle_acts);
 }
 
-// Where and when the finger went down, and a swipe not yet taken by main.
+// Where and when the finger went down, whether an alert was up then, and a
+// swipe not yet taken by main.
 static lv_point_t press_at = { 0, 0 };
 static uint32_t press_ms = 0;
+static bool press_alert = false;
 static int pending_swipe = 0;
 
 // A finger on the panel: on release, a quick horizontal swipe asks for
@@ -309,6 +311,7 @@ static void indev_cb(lv_event_t* e) {
     if (code == LV_EVENT_PRESSED) {
         press_at = p;
         press_ms = now_ms();
+        press_alert = attention_on;
         return;
     }
     if (code != LV_EVENT_RELEASED) return;
@@ -316,10 +319,24 @@ static void indev_cb(lv_event_t* e) {
                                 lv_display_get_horizontal_resolution(NULL));
     if (step) {
         engage();
+        // The peek is on the meters: bring them back, as a button press
+        // does (an alert stays up).
+        resume_screensaver = false;
+        if (!attention_on && beat != B_HOME && beat != B_CORNER) {
+            if (beat == B_PEEK) {
+                if (face_visible()) to_meters(true);
+            } else {
+                to_meters(false);
+            }
+        }
         pending_swipe = step;
         Serial.printf("[%lu] director: swipe %s\n", (unsigned long)now_ms(), step > 0 ? "left (next account)" : "right (previous account)");
         return;
     }
+    // An alert that came or went while the finger was down isn't what it
+    // touched: neither dismiss the new one nor act on the screen behind the
+    // old one.
+    if (attention_on != press_alert) return;
     director_tap(press_at.x);
 }
 

@@ -275,6 +275,7 @@ older firmware can't tell accounts apart and may read a switch as a reset
 (the reset chime, if it's on). A peek
 never changes which account the device follows, and its numbers never count
 as usage on the device.
+
 **Every account at a glance.** With two or more accounts, the Overview has
 an **Accounts** card and the tray lists one row per account under the meters.
 Each row shows the account's name, its usage and when its week resets, and

@@ -161,7 +161,7 @@ walk home), every tap draws his attention and the face comes up to see what
 you want (`clawd_tap_react`). There's no cooldown and no lesser reaction:
 the face is what a tap on the glass gets.
 
-- **Seated** (or in an idle act of his own): a startled hop on the next frame
+- **Seated** (or in an idle act of his own): a startled hop as the finger lifts
   (`jumping` from frame 1, its crouch, not the idle frame every act opens
   with, held 330–580 ms), at 2×, then he ducks out through the nearest edge
   at 4×. His seat is a few steps from the left edge, so the face starts
