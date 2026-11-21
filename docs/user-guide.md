@@ -409,6 +409,28 @@ and any retry delay. Transient failures delay retries by 10, 20, then 30
 minutes. A failed check never becomes a zero reading. Heartbeats stop once
 the selected reading is stale, allowing the device to show the loss of fresh data.
 
+### Tokens and network calls
+
+**Does Clawdmeter use my tokens?** Only through the probe, and only while a
+5-hour session is running. The probe is one short Haiku message, which counts a
+few tokens against that session. An account with no 5-hour limit is never sent
+a probe, and nor is a spend-capped account, so Clawdmeter uses none of their
+tokens. Every other check is a read-only request that sends no message.
+
+Everything Clawdmeter sends over the network:
+
+| Call | Goes to | When | Tokens |
+| --- | --- | --- | --- |
+| Probe: `claude -p --model haiku`, "Reply with just: ok", no tools | Anthropic, through Claude Code | While that account's 5-hour session is known to be running: the shown account after a prompt and every 3 to 15 minutes, depending on activity; other accounts every 10 minutes | A few, against the running session |
+| Usage endpoint, `GET api.anthropic.com/api/oauth/usage`, with the sign-in Claude Code stored and User-Agent `clawdmeter/<version>` | Anthropic | When no session is running, and as a fallback: every 12 minutes per account | None |
+| `claude -p /usage` | Anthropic, through Claude Code | When the stored sign-in has expired or is refused, or can't be read | None (a Claude Code command, not a message) |
+| `GET chatgpt.com/backend-api/wham/usage` and `…/rate-limit-reset-credits` | OpenAI | Codex accounts only: every 5 or 10 minutes, and the credits at most hourly | None |
+| GitHub releases (`api.github.com`, `github.com`) | GitHub | Every 6 hours while **Check for updates** is on; downloads only when you flash a board or update the app | None |
+
+Nothing else is sent: no telemetry and no account with us. Sign-ins are only
+read, never copied or refreshed. Hook events and alerts stay on this computer
+and go to the board over Bluetooth.
+
 ### Command line
 
 ```text
