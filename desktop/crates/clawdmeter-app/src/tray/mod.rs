@@ -92,6 +92,8 @@ struct MenuShape {
     /// The accounts the "Show on device" submenu lists ([`device_accounts`]):
     /// none with fewer than two.
     device_accounts: usize,
+    /// A row per account ([`account_line`]), with two or more.
+    accounts: usize,
 }
 
 #[cfg(any(not(target_os = "macos"), test))]
@@ -103,8 +105,21 @@ impl MenuShape {
             resets: snap.shown_resets().is_some(),
             update: offer.is_some(),
             device_accounts: 0,
+            accounts: snap.accounts.len(),
         }
     }
+}
+
+/// One account's row in the Linux/Windows menu: "● example.com  Week 95% ·
+/// resets Thu 00:00", a hollow dot for the accounts the device doesn't show,
+/// "· most room" on the one with the most left.
+#[cfg(not(target_os = "macos"))]
+fn account_line(r: &crate::ipc::AccountRow, home: &std::path::Path) -> String {
+    let mut s = format!("{} {}  {}", if r.shown { "●" } else { "○" }, r.name(home), r.text(&chrono::Local));
+    if r.most_room {
+        s.push_str(" · most room");
+    }
+    s
 }
 
 /// How many accounts the "Show on device" submenu lists: every one
@@ -312,6 +327,8 @@ struct Items {
     update: MenuItem,
     /// "Show on device", with two or more accounts ([`device_menu`]).
     device: Option<(Submenu, Vec<CheckMenuItem>)>,
+    /// A row per account ([`MenuShape::accounts`]), ids `acct-<index>`.
+    accounts: Vec<MenuItem>,
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -332,6 +349,7 @@ impl Items {
             chime: CheckMenuItem::with_id("chime", "Chime on this computer", true, false, None),
             update: MenuItem::with_id("update", "Update firmware…", true, None),
             device: device_menu(shape.device_accounts),
+            accounts: (0..shape.accounts).map(|i| MenuItem::with_id(format!("acct-{i}"), "–", true, None)).collect(),
         };
         let open = MenuItem::with_id("open", "Open Clawdmeter", true, None);
         let settings = MenuItem::with_id("settings", "Settings…", true, None);
@@ -351,6 +369,11 @@ impl Items {
         }
         if shape.resets {
             list.push(&it.resets);
+        }
+        let sep_accounts = separator();
+        if !it.accounts.is_empty() {
+            list.push(&sep_accounts);
+            list.extend(it.accounts.iter().map(|a| a as &dyn tray_icon::menu::IsMenuItem));
         }
         list.extend([&sep2 as &dyn tray_icon::menu::IsMenuItem, &it.refresh, &it.chime, &sep3, &open, &settings]);
         if shape.update {
@@ -408,6 +431,9 @@ impl Items {
         if let Some(held) = snap.shown_resets() {
             self.resets.set_text(resets_row(held, &snap.resets_expiries, &chrono::Local));
         }
+        for (item, row) in self.accounts.iter().zip(&snap.accounts) {
+            item.set_text(account_line(row, &paths.home));
+        }
         let (refresh, can_refresh) = refresh_item(snap, pressed, now);
         self.refresh.set_text(refresh);
         self.refresh.set_enabled(can_refresh);
@@ -431,6 +457,7 @@ impl Items {
             "chime" => Click::Chime,
             "update" => open(update_page),
             "quit" => Click::App(AppCommand::Quit),
+            other if other.starts_with("acct-") => open(Page::Overview),
             other => return device_pick(other).map(Click::DeviceAccount),
         })
     }
@@ -1233,6 +1260,8 @@ mod tests {
         );
         let five = StatusSnapshot { no_session_limit: false, ..codex };
         assert!(!MenuShape::of(&five, None).resets, "with a 5-hour window the week shows instead, as on the device");
+        let rows = vec![crate::ipc::AccountRow::default(); 3];
+        assert_eq!(MenuShape::of(&StatusSnapshot { accounts: rows, ..five }, None).accounts, 3, "a row per account");
     }
 
     #[test]

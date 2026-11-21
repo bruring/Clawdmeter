@@ -7,7 +7,7 @@
 //! HOME=/tmp/cm XDG_CACHE_HOME=/tmp/cm/.cache \
 //!   cargo run -p clawdmeter-app --example demo -- [--page PAGE] [--status connected|off]
 //!   [--board none|fresh|current|old] [--setup welcome|board|flash|pair|hooks|done] [--hooks-preview]
-//!   [--flash-to identify|firmware|flash|done] [--shop] [--accounts retrying] [--refresh wait|checking]
+//!   [--flash-to identify|firmware|flash|done] [--shop] [--accounts retrying|three] [--refresh wait|checking]
 //!   [--app-update download|downloading|ready|failed|none|linux|linux-menu]
 //!   [--advanced] [--session idle|week] [--buttons custom] [--edit primary|secondary|pwr] [--record]
 //!   [--firmware-skipped] [--codex week|5h|listed] [--resets N] [--fable PCT] [--week PCT]
@@ -38,6 +38,8 @@
 //! the device shows (it needs two or more accounts, e.g. `--codex week`).
 //!
 //! `--accounts retrying` adds a second account that is being rate-limited;
+//! `--accounts three` lists three weekly-only accounts, the Overview's
+//! Accounts card and the trays' rows (`StatusSnapshot::accounts`);
 //! `--refresh` shows the Overview's refresh button waiting out the
 //! per-account gap, or mid-check.
 
@@ -146,7 +148,7 @@ struct FakeUsage {
     week_pct: Option<u32>,
 }
 
-fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>, usage: FakeUsage) {
+fn fake_status(paths: &Paths, retrying: bool, three: bool, refresh: Option<String>, usage: FakeUsage) {
     let FakeUsage { session, codex, resets, fable, week_pct } = usage;
     // `idle`: session not started; `week`: no 5-hour limit (verified Ultra).
     let idle = session.as_deref() == Some("idle");
@@ -156,6 +158,12 @@ fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>, usage: Fa
     if retrying {
         std::fs::create_dir_all(&work).unwrap();
         std::fs::write(&paths.config_file, "config_dirs = ~/.claude, ~/.claude-work\n").unwrap();
+    }
+    if three {
+        for d in [".claude-b", ".claude-c"] {
+            std::fs::create_dir_all(paths.home.join(d)).unwrap();
+        }
+        std::fs::write(&paths.config_file, "config_dirs = ~/.claude, ~/.claude-b, ~/.claude-c\n").unwrap();
     }
     // A Codex account on the device: weekly-only with its reset credits, or
     // with a 5-hour window.
@@ -198,6 +206,27 @@ fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>, usage: Fa
             polling: refresh.as_deref() == Some("checking"),
             ..Default::default()
         };
+        if three {
+            let row = |dir: &str, label: &str, pct: u32, days: i64, resets: u32| ipc::AccountRow {
+                dir: paths.home.join(dir).display().to_string(),
+                label: label.into(),
+                shown: dir == ".claude",
+                week_pct: Some(pct),
+                week_resets_at: Some(started + days * 86_400 + 11 * 3600),
+                resets_held: Some(resets),
+                ..Default::default()
+            };
+            snap.no_session_limit = true;
+            snap.session_pct = None;
+            snap.window_started = false;
+            snap.session_resets_at = None;
+            snap.week_pct = Some(95);
+            snap.accounts = vec![
+                row(".claude", "acme.ai", 95, 4, 0),
+                ipc::AccountRow { most_room: true, ..row(".claude-b", "initech.net", 12, 6, 1) },
+                ipc::AccountRow { stale: true, ..row(".claude-c", "globex-inc.com", 40, 1, 1) },
+            ];
+        }
         if codex_shown {
             snap = StatusSnapshot {
                 account: Some(paths.home.join(".codex").display().to_string()),
@@ -256,6 +285,7 @@ fn main() {
         fake_status(
             &paths,
             arg(&args, "--accounts").as_deref() == Some("retrying"),
+            arg(&args, "--accounts").as_deref() == Some("three"),
             arg(&args, "--refresh"),
             FakeUsage {
                 session: arg(&args, "--session"),

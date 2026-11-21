@@ -83,6 +83,21 @@ pub struct AccountError {
     pub retrying: bool,
 }
 
+/// One account's latest numbers, for the rows that list every account.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountStatus {
+    /// The account (config dir or Codex home).
+    pub dir: PathBuf,
+    /// A Codex account.
+    pub codex: bool,
+    /// Its last reading (kept through misses; `None` before the first).
+    pub reading: Option<UsageReading>,
+    /// Seconds since that reading.
+    pub age_secs: Option<i64>,
+    /// Its polls keep missing: the numbers are old.
+    pub stale: bool,
+}
+
 /// Snapshot for the tray / status output.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EngineStatus {
@@ -118,6 +133,8 @@ pub struct EngineStatus {
     pub paused_until: Option<i64>,
     /// The shown account is being polled.
     pub polling: bool,
+    /// Every account, in [`Settings::accounts`] order.
+    pub accounts: Vec<AccountStatus>,
 }
 
 /// The daemon state machine.
@@ -902,6 +919,20 @@ impl Engine {
                 .active
                 .as_ref()
                 .is_some_and(|a| self.in_flight.contains(a) || self.codex_in_flight.contains(a)),
+            accounts: self
+                .settings
+                .accounts()
+                .map(|(d, codex)| {
+                    let a = self.accounts.get(d);
+                    AccountStatus {
+                        dir: d.clone(),
+                        codex,
+                        reading: a.and_then(|a| a.last.clone()),
+                        age_secs: a.and_then(|a| a.age(now)),
+                        stale: a.is_some_and(|a| a.is_stale(now)),
+                    }
+                })
+                .collect(),
         }
     }
 }

@@ -81,6 +81,21 @@ pub struct Header {
     pub update: Option<super::Update>,
     /// Whose endpoint the numbers come from: the paused text names it.
     pub provider: Provider,
+    /// Every account under the meters, with two or more.
+    pub accounts: Vec<AccountLine>,
+}
+
+/// One account under the meters: its name on one line (a filled dot when
+/// the device shows it, "most room" on the one with the most left), its
+/// numbers (`AccountRow::text`) on the next.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AccountLine {
+    /// "● example.com · most room".
+    pub name: String,
+    /// "Week 95% · resets Thu 00:00".
+    pub text: String,
+    /// The numbers are old (drawn dimmer).
+    pub stale: bool,
 }
 
 impl Meter {
@@ -174,6 +189,20 @@ impl Header {
             chime: desktop_chime,
             update: None,
             provider: super::provider(s),
+            accounts: s
+                .accounts
+                .iter()
+                .map(|r| AccountLine {
+                    name: format!(
+                        "{} {}{}",
+                        if r.shown { "●" } else { "○" },
+                        r.name(home),
+                        if r.most_room { " · most room" } else { "" }
+                    ),
+                    text: r.text(&chrono::Local),
+                    stale: r.stale,
+                })
+                .collect(),
         }
     }
 

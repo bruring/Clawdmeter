@@ -51,7 +51,35 @@ fn main() {
         read_at: Some(now - 360),
         ..Default::default()
     };
+    let row = |dir: &str, label: &str, shown: bool, week: u32, resets: Option<u32>| clawdmeter_app::ipc::AccountRow {
+        dir: format!("/Users/you/{dir}"),
+        label: label.into(),
+        shown,
+        week_pct: Some(week),
+        week_resets_at: Some(now + (2 * 24 + 9) * 3600),
+        resets_held: resets,
+        ..Default::default()
+    };
     let states = [
+        (
+            // Three weekly-only accounts under the meter.
+            "accounts",
+            false,
+            StatusSnapshot {
+                no_session_limit: true,
+                week_pct: Some(95),
+                week_resets_at: Some(now + (2 * 24 + 9) * 3600),
+                accounts: vec![
+                    row(".claude", "acme.ai", true, 95, Some(0)),
+                    clawdmeter_app::ipc::AccountRow {
+                        most_room: true,
+                        ..row(".claude-b", "initech.net", false, 12, Some(1))
+                    },
+                    clawdmeter_app::ipc::AccountRow { stale: true, ..row(".claude-c", "", false, 40, None) },
+                ],
+                ..base.clone()
+            },
+        ),
         (
             "weekly-only",
             false,

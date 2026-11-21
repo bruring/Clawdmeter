@@ -86,6 +86,16 @@ is faked behind `FlashHardware`.
   platform with two or more accounts (`MenuShape::device_accounts` on
   Linux/Windows); a pick saves `device_account` through `write_settings`,
   like the chime.
+  With two or more accounts, `StatusSnapshot::accounts` (`ipc::account_rows`,
+  from `EngineStatus::accounts`; names from the daemon's `AccountLabels`, the
+  sign-in's email domain via `identity::labels`) lists every account. The
+  Overview draws them as an Accounts card (`accounts_card`), the macOS panel as
+  name-and-numbers rows under the meters (`Header::accounts`, `ACCOUNT_ROWS`),
+  and Linux/Windows as `acct-<index>` items (`MenuShape::accounts`,
+  `account_line`). Each row's text is `AccountRow::text`; `most_room` marks the
+  fresh Claude account with windows (no spend cap, not Codex) whose fuller
+  window is emptiest; names come from `.claude.json`'s email (`identity::email`),
+  the domain while it's unique, else the folder.
   `StatusSnapshot::spend` marks a spend-capped account, drawn as one Spend
   meter in the panel, the rows and the Overview),
   window (`ui/`), `daemon.rs` (drives the engine on its own thread: 0.5 s

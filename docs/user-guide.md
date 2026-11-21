@@ -244,6 +244,21 @@ a drop in usage for a reset (the reset chime, if it's on, and Clawd's
 reaction) and a rise for heavy use. Automatic switching between Claude
 accounts does the same.
 
+**Every account at a glance.** With two or more accounts, the Overview has
+an **Accounts** card and the tray lists one row per account under the meters.
+Each row shows the account's name, its usage and when its week resets, and
+its reset count when that is known:
+
+- The name is the sign-in's email domain (such as `example.com`), or the
+  folder when the domain isn't known or two accounts share it.
+- A filled dot marks the account the device shows.
+- **most room** marks the Claude account with the most left: its fuller window
+  is the emptiest among accounts with fresh numbers. Spend-capped and Codex
+  accounts aren't compared.
+- A row whose checks keep failing says **out of date**, and one with no
+  numbers because its sign-in needs fixing says **Sign-in needed**. Codex
+  accounts are marked **(Codex)**.
+
 **Codex accounts (a trial).** With the Codex CLI signed in to ChatGPT, its
 folder (`~/.codex`, or `$CODEX_HOME`) is picked up as an account on its own;
 the Accounts page's **Add account folder…** takes other Codex folders too (a

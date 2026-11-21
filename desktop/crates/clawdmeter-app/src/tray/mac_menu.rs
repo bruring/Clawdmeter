@@ -65,6 +65,11 @@ const CHIP_GAP: f64 = 6.0;
 /// the rounded ends: "+10 more" (about 52 pt) fits a chip, "+100 more"
 /// (about 59 pt) shortens to "+100".
 const CHIP_TEXT_INSET: f64 = 5.0;
+/// The account rows under the meters (`Header::accounts`): how many the
+/// panel has room for, the gap above them, and one account's two lines.
+const ACCOUNT_ROWS: usize = 8;
+const ACCOUNTS_GAP: f64 = 12.0;
+const ACCOUNT_H: f64 = 32.0;
 
 /// What a click in the panel asks the tray to do.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -360,6 +365,8 @@ pub struct MenuHeader {
     spinner: Retained<NSProgressIndicator>,
     meters: [MeterViews; 2],
     resets: ResetViews,
+    /// Each account's name and numbers ([`ACCOUNT_ROWS`] of them).
+    accounts: Vec<(Retained<NSTextField>, Retained<NSTextField>)>,
     line: Retained<NSBox>,
     open: Retained<NSButton>,
     update: Retained<HoverButton>,
@@ -632,6 +639,17 @@ impl MenuHeader {
         }
         view.addSubview(&resets.note);
 
+        // Every account, under the meters.
+        let accounts: Vec<_> = (0..ACCOUNT_ROWS)
+            .map(|_| {
+                let name = label(mtm, &NSFont::systemFontOfSize_weight(12.0, medium), &primary);
+                let text = label(mtm, &small, &secondary);
+                view.addSubview(&name);
+                view.addSubview(&text);
+                (name, text)
+            })
+            .collect();
+
         // The footer: a line, Open Clawdmeter, and the icons on the right.
         let line = bar(mtm, 0.0, &NSColor::separatorColor());
         // SAFETY: the target is the panel view, which holds the button, and
@@ -684,6 +702,7 @@ impl MenuHeader {
             spinner,
             meters,
             resets,
+            accounts,
             line,
             open,
             update,
@@ -788,7 +807,25 @@ impl MenuHeader {
         self.layout_resets(h.resets.as_ref(), METERS_Y + METER_H + METER_GAP, dark);
         let n = if h.resets.is_some() { 2.0 } else { h.meters.len().min(2) as f64 };
         let meters_end = METERS_Y + n * METER_H + (n - 1.0).max(0.0) * METER_GAP;
-        let height = meters_end + FOOT_GAP;
+        let rows = h.accounts.len().min(ACCOUNT_ROWS);
+        for (i, (name, text)) in self.accounts.iter().enumerate() {
+            let Some(a) = h.accounts.get(i).filter(|_| i < rows) else {
+                name.setHidden(true);
+                text.setHidden(true);
+                continue;
+            };
+            let y = meters_end + ACCOUNTS_GAP + i as f64 * ACCOUNT_H;
+            name.setStringValue(&NSString::from_str(&a.name));
+            name.setFrame(rect(PAD, y, bar_w, 15.0));
+            text.setStringValue(&NSString::from_str(&a.text));
+            text.setFrame(rect(PAD + 14.0, y + 15.0, bar_w - 14.0, 14.0));
+            let color = if a.stale { NSColor::tertiaryLabelColor() } else { NSColor::secondaryLabelColor() };
+            text.setTextColor(Some(&color));
+            name.setHidden(false);
+            text.setHidden(false);
+        }
+        let body_end = if rows > 0 { meters_end + ACCOUNTS_GAP + rows as f64 * ACCOUNT_H } else { meters_end };
+        let height = body_end + FOOT_GAP;
         let foot_height = self.layout_footer(h, 0.0, dark);
         for (item, view, h) in [(&self.item, &self.view, height), (&self.foot_item, &self.foot_view, foot_height)] {
             if (view.frame().size.height - h).abs() > 0.5 {

@@ -47,7 +47,7 @@ pub mod themes;
 pub mod usage;
 
 pub use config::{ConfigFile, Settings};
-pub use engine::{AccountError, Engine, EngineStatus, HostClock, PollPlan, Write, WriteKind};
+pub use engine::{AccountError, AccountStatus, Engine, EngineStatus, HostClock, PollPlan, Write, WriteKind};
 pub use paths::Paths;
 pub use payload::Payload;
 pub use usage::{UsageError, UsageReading, Window};

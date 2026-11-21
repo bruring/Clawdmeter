@@ -81,6 +81,41 @@ pub struct Status {
     pub claude: Option<PathBuf>,
     /// The hub's listener (`hub_listen`), for other computers' hooks.
     pub hub: crate::hub::HubState,
+    /// Short names for the accounts that have one ([`AccountLabels`]).
+    pub labels: Vec<(PathBuf, String)>,
+}
+
+/// The accounts' short names (`identity::labels`: the sign-in's email
+/// domain), read again when the list changes or every 5 minutes, since a
+/// sign-in can change underneath.
+#[derive(Default)]
+struct AccountLabels {
+    dirs: Vec<PathBuf>,
+    at: i64,
+    names: Vec<(PathBuf, String)>,
+}
+
+impl AccountLabels {
+    const EVERY_SECS: i64 = 300;
+
+    fn refresh(&mut self, settings: &Settings, home: &std::path::Path, now: i64) {
+        let dirs: Vec<PathBuf> = settings.accounts().map(|(d, _)| d.clone()).collect();
+        if dirs == self.dirs && now - self.at < Self::EVERY_SECS {
+            return;
+        }
+        let ids: Vec<_> = settings
+            .accounts()
+            .map(|(d, codex)| if codex { None } else { clawdmeter_core::identity::email(d, home) })
+            .collect();
+        self.names = dirs
+            .iter()
+            .cloned()
+            .zip(clawdmeter_core::identity::labels(&ids))
+            .filter_map(|(d, l)| Some((d, l?)))
+            .collect();
+        self.dirs = dirs;
+        self.at = now;
+    }
 }
 
 /// Handle held by the UI.
@@ -201,6 +236,8 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     engine.set_claude_found(claude.is_some());
     let mut hub = crate::hub::Hub::default();
     hub.sync(&crate::hub::config(&paths), &engine.settings().config_dirs, &paths, unix_now());
+    let mut labels = AccountLabels::default();
+    labels.refresh(engine.settings(), &paths.home, unix_now());
 
     let mut link: Option<DeviceLink> = None;
     let mut device_events: Option<DeviceEvents> = None;
@@ -246,6 +283,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     last_settings = now;
                     reload_settings(&paths, &mut engine, &mut claude);
                     hub.sync(&crate::hub::config(&paths), &engine.settings().config_dirs, &paths, now);
+                    labels.refresh(engine.settings(), &paths.home, now);
                 }
                 Ok(Command::Shutdown) | Err(mpsc::error::TryRecvError::Disconnected) => {
                     if let Some(l) = link.take() {
@@ -264,6 +302,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             last_settings = now;
             reload_settings(&paths, &mut engine, &mut claude);
             hub.sync(&crate::hub::config(&paths), &engine.settings().config_dirs, &paths, now);
+            labels.refresh(engine.settings(), &paths.home, now);
         }
 
         // ---- fast clock ----
@@ -463,6 +502,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             last_write_at,
             claude: claude.clone(),
             hub: hub.state.clone(),
+            labels: labels.names.clone(),
         });
     }
 }

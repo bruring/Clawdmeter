@@ -60,6 +60,159 @@ pub struct AccountError {
     pub retrying: bool,
 }
 
+/// One account in the rows that list them all (the Overview's Accounts card,
+/// both trays), with two or more accounts.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountRow {
+    /// The folder.
+    pub dir: String,
+    /// The sign-in's email domain when known (`identity::labels`), else empty:
+    /// [`AccountRow::name`] falls back to the folder.
+    #[serde(default)]
+    pub label: String,
+    /// The device shows this one.
+    pub shown: bool,
+    /// A Codex account.
+    #[serde(default)]
+    pub codex: bool,
+    /// The 5-hour window's % (`None`: no limit, spend-capped, or no data).
+    pub session_pct: Option<u32>,
+    /// It is running.
+    #[serde(default)]
+    pub window_started: bool,
+    /// When it resets.
+    pub session_resets_at: Option<i64>,
+    /// The week's %.
+    pub week_pct: Option<u32>,
+    /// When the week resets.
+    pub week_resets_at: Option<i64>,
+    /// A spend-capped account's spend %.
+    pub spend_pct: Option<u32>,
+    /// Reset credits held, when known.
+    pub resets_held: Option<u32>,
+    /// The numbers are old (polls keep missing).
+    pub stale: bool,
+    /// No numbers, and the last check failed in a way the user has to fix
+    /// (signed out, a refused or expired sign-in).
+    #[serde(default)]
+    pub signed_out: bool,
+    /// The most room left of the Claude accounts with fresh usage windows
+    /// (the higher of the session and week %, lowest), with two or more to
+    /// compare. Spend caps and Codex accounts measure other things.
+    #[serde(default)]
+    pub most_room: bool,
+}
+
+impl AccountRow {
+    /// What the row is called: the label, else the folder (`~` for home);
+    /// a Codex account says so, as the "Show on device" menu does.
+    pub fn name(&self, home: &std::path::Path) -> String {
+        let name = if self.label.is_empty() { crate::tilde(&self.dir, home) } else { self.label.clone() };
+        if self.codex {
+            format!("{name} (Codex)")
+        } else {
+            name
+        }
+    }
+
+    /// The numbers in one line, as every surface writes them:
+    /// "Week 95% · resets Thu 00:00 · 0 resets", "5h 40% · Week 30% · resets
+    /// Thu 00:00", "Spend 40%", "No data yet". Times are in `tz`.
+    pub fn text<Tz: chrono::TimeZone>(&self, tz: &Tz) -> String
+    where
+        Tz::Offset: std::fmt::Display,
+    {
+        let when = |t: Option<i64>| {
+            t.and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+                .map(|t| format!(" · resets {}", t.with_timezone(tz).format("%a %H:%M")))
+                .unwrap_or_default()
+        };
+        let mut s = match (self.spend_pct, self.session_pct, self.week_pct) {
+            (Some(p), _, _) => format!("Spend {p}%"),
+            (None, Some(_), w) if !self.window_started => {
+                format!("5h not started · Week {}{}", pct(w), when(self.week_resets_at))
+            }
+            (None, Some(p), w) => format!("5h {p}% · Week {}{}", pct(w), when(self.week_resets_at)),
+            (None, None, Some(w)) => format!("Week {w}%{}", when(self.week_resets_at)),
+            (None, None, None) if self.signed_out => return "Sign-in needed".into(),
+            (None, None, None) => return "No data yet".into(),
+        };
+        if let Some(n) = self.resets_held {
+            s.push_str(&format!(" · {n} reset{}", if n == 1 { "" } else { "s" }));
+        }
+        if self.stale {
+            s.push_str(" · out of date");
+        }
+        s
+    }
+
+    /// How full its fullest window is (`None`: no numbers).
+    fn fullest(&self) -> Option<u32> {
+        self.spend_pct.or(match (self.session_pct.filter(|_| self.window_started), self.week_pct) {
+            (Some(s), Some(w)) => Some(s.max(w)),
+            (s, w) => s.or(w),
+        })
+    }
+}
+
+fn pct(p: Option<u32>) -> String {
+    p.map_or_else(|| "--".into(), |p| format!("{p}%"))
+}
+
+/// The rows for every account, or none with fewer than two. `labels` are
+/// the daemon's short names.
+pub fn account_rows(e: &clawdmeter_core::EngineStatus, labels: &[(PathBuf, String)], now: i64) -> Vec<AccountRow> {
+    use clawdmeter_core::usage::MeterKind;
+    if e.accounts.len() < 2 {
+        return Vec::new();
+    }
+    let mut rows: Vec<AccountRow> = e
+        .accounts
+        .iter()
+        .map(|a| {
+            let r = a.reading.as_ref();
+            let spend = r.filter(|r| r.meter_kind() == MeterKind::Spend);
+            // Reset credits where the main screens show them: a weekly-only plan.
+            let resets = r
+                .filter(|r| r.no_session_limit())
+                .and_then(|r| r.resets.as_ref())
+                .map(|c| chrono::DateTime::from_timestamp(now, 0).map_or(c.held, |at| c.at(at).held));
+            AccountRow {
+                dir: a.dir.display().to_string(),
+                label: labels.iter().find(|(d, _)| *d == a.dir).map(|(_, l)| l.clone()).unwrap_or_default(),
+                shown: e.active_account.as_ref() == Some(&a.dir),
+                codex: a.codex,
+                session_pct: r.filter(|r| spend.is_none() && !r.no_session_limit()).map(|r| r.session_pct()),
+                window_started: r.is_some_and(|r| r.window_started()),
+                session_resets_at: r.and_then(|r| r.session.as_ref()).and_then(|w| w.resets_at).map(|t| t.timestamp()),
+                week_pct: r.filter(|_| spend.is_none()).and_then(|r| r.week.as_ref()).map(|w| w.pct),
+                week_resets_at: r
+                    .filter(|_| spend.is_none())
+                    .and_then(|r| r.week.as_ref())
+                    .and_then(|w| w.resets_at)
+                    .map(|t| t.timestamp()),
+                spend_pct: spend.map(|r| r.session_pct()),
+                resets_held: resets,
+                stale: a.stale,
+                signed_out: r.is_none() && e.errors.iter().any(|x| x.dir == a.dir && !x.retrying),
+                most_room: false,
+            }
+        })
+        .collect();
+    let fresh: Vec<(usize, u32)> = rows
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| !r.stale && !r.codex && r.spend_pct.is_none())
+        .filter_map(|(i, r)| Some((i, r.fullest()?)))
+        .collect();
+    if fresh.len() >= 2 {
+        if let Some(&(i, _)) = fresh.iter().min_by_key(|(_, f)| *f) {
+            rows[i].most_room = true;
+        }
+    }
+    rows
+}
+
 /// The window-facing view of [`Status`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StatusSnapshot {
@@ -150,6 +303,9 @@ pub struct StatusSnapshot {
     /// `ResetCredits::MAX_EXPIRIES`); empty when unknown.
     #[serde(default)]
     pub resets_expiries: Vec<i64>,
+    /// Every account, with two or more ([`account_rows`]).
+    #[serde(default)]
+    pub accounts: Vec<AccountRow>,
 }
 
 impl StatusSnapshot {
@@ -219,6 +375,7 @@ impl StatusSnapshot {
             codex: reading.is_some_and(|r| r.provider == clawdmeter_core::usage::Provider::Codex),
             resets_held: resets.as_ref().map(|c| c.held),
             resets_expiries: resets.map(|c| c.expiries.iter().map(|t| t.timestamp()).collect()).unwrap_or_default(),
+            accounts: account_rows(e, &s.labels, now),
         }
     }
 
@@ -503,6 +660,75 @@ mod tests {
     use clawdmeter_core::usage::{SessionLimit, UsageReading, Window};
     use clawdmeter_core::EngineStatus;
 
+    #[test]
+    fn every_account_gets_a_row() {
+        use chrono::{DateTime, Utc};
+        use clawdmeter_core::usage::{ResetCredits, Spend};
+        use clawdmeter_core::AccountStatus;
+        let now = 1_795_000_000;
+        let at = |t: i64| DateTime::<Utc>::from_timestamp(t, 0);
+        // Thursday 2026-11-26 00:00 UTC.
+        let thu = 1_795_651_200;
+        let week = |pct| Some(Window { pct, resets_at: at(thu) });
+        let acct = |dir: &str, reading: Option<UsageReading>, stale| AccountStatus {
+            dir: dir.into(),
+            codex: false,
+            reading,
+            age_secs: Some(60),
+            stale,
+        };
+        let ultra = UsageReading {
+            week: week(95),
+            session_limit: SessionLimit::Absent,
+            resets: Some(ResetCredits { held: 0, expiries: vec![] }),
+            ..Default::default()
+        };
+        let max = UsageReading {
+            session: Some(Window { pct: 40, resets_at: at(now + 3600) }),
+            week: week(30),
+            ..Default::default()
+        };
+        let spend =
+            UsageReading { spend: Some(Spend { pct: 12, resets_at: None, period: None }), ..Default::default() };
+        let e = EngineStatus {
+            active_account: Some("/h/.claude".into()),
+            accounts: vec![
+                acct("/h/.claude", Some(ultra), false),
+                acct("/h/.claude-b", Some(max.clone()), false),
+                acct("/h/.claude-c", Some(spend), false),
+                acct("/h/.claude-d", Some(max), true),
+                acct("/h/.claude-e", None, true),
+                acct("/h/.claude-f", None, false),
+            ],
+            errors: vec![clawdmeter_core::AccountError {
+                dir: "/h/.claude-e".into(),
+                message: "signed out".into(),
+                retrying: false,
+            }],
+            ..Default::default()
+        };
+        let labels = vec![(PathBuf::from("/h/.claude"), "acme.ai".to_owned())];
+        let rows = account_rows(&e, &labels, now);
+        let home = std::path::Path::new("/h");
+        let got: Vec<(String, String, bool, bool)> =
+            rows.iter().map(|r| (r.name(home), r.text(&Utc), r.shown, r.most_room)).collect();
+        let want = [
+            ("acme.ai", "Week 95% · resets Thu 00:00 · 0 resets", true, false),
+            ("~/.claude-b", "5h 40% · Week 30% · resets Thu 00:00", false, true),
+            ("~/.claude-c", "Spend 12%", false, false),
+            ("~/.claude-d", "5h 40% · Week 30% · resets Thu 00:00 · out of date", false, false),
+            ("~/.claude-e", "Sign-in needed", false, false),
+            ("~/.claude-f", "No data yet", false, false),
+        ];
+        assert_eq!(got.len(), want.len());
+        for (g, w) in got.iter().zip(want) {
+            assert_eq!((g.0.as_str(), g.1.as_str(), g.2, g.3), w);
+        }
+        // One account: no rows (the meters already are it).
+        let one = EngineStatus { accounts: e.accounts[..1].to_vec(), ..e.clone() };
+        assert!(account_rows(&one, &labels, now).is_empty());
+    }
+
     fn status(link: LinkState, reading: bool, last_write: Option<i64>) -> Status {
         Status {
             link,
@@ -517,6 +743,7 @@ mod tests {
             last_write_at: last_write,
             claude: None,
             hub: Default::default(),
+            labels: Vec::new(),
         }
     }
 

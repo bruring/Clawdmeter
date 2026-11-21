@@ -451,6 +451,53 @@ fn resets_card(t: &Theme, held: u32, expires_at: &[i64], inner_w: f32) -> impl I
     div().flex().flex_col().p(px(16.)).rounded(px(R_M)).bg(t.panel).font_family(FONT_BODY).child(header).child(body)
 }
 
+/// Every account in one card, with two or more (`StatusSnapshot::accounts`):
+/// a filled dot for the one the device shows, the name, its numbers in one
+/// line (`AccountRow::text`), and a tag on the one with the most room left.
+fn accounts_card(t: &Theme, rows: &[crate::ipc::AccountRow], home: &std::path::Path) -> impl IntoElement {
+    let row = |r: &crate::ipc::AccountRow| {
+        let marker = div().flex_shrink_0().w(px(8.)).h(px(8.)).rounded(px(4.));
+        let marker = if r.shown { marker.bg(t.text) } else { marker.border_1().border_color(t.dim) };
+        div()
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .min_w_0()
+            .child(marker)
+            .child(div().flex_shrink_0().text_size(px(14.)).text_color(t.text).child(r.name(home)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(px(13.))
+                    .text_color(if r.stale { t.dim } else { t.mute })
+                    .child(r.text(&chrono::Local)),
+            )
+            .children(r.most_room.then(|| {
+                div()
+                    .flex_shrink_0()
+                    .px(px(8.))
+                    .py(px(1.))
+                    .rounded(px(R_PILL))
+                    .bg(t.track)
+                    .text_size(px(12.))
+                    .text_color(t.text)
+                    .child("most room")
+            }))
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(10.))
+        .p(px(16.))
+        .rounded(px(R_M))
+        .bg(t.panel)
+        .font_family(FONT_BODY)
+        .child(div().text_size(px(16.)).text_color(t.text).child("Accounts"))
+        .children(rows.iter().map(row))
+}
+
 impl Render for OverviewView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = Theme::for_appearance(window.appearance());
@@ -601,6 +648,9 @@ impl Render for OverviewView {
                     .collect()
             };
             page = page.child(div().flex().flex_col().gap(px(12.)).children(meters));
+        }
+        if s.accounts.len() >= 2 {
+            page = page.child(accounts_card(&t, &s.accounts, &home));
         }
         if let Some(tag) = self.firmware_nudge() {
             let v = tag.trim_start_matches('v').to_owned();

@@ -108,6 +108,28 @@ pub fn read(config_dir: &Path, home: &Path) -> Option<Identity> {
     (!id.is_empty()).then_some(id)
 }
 
+/// The email `config_dir` is signed in with (`.claude.json`'s
+/// `oauthAccount`; the credentials file has none), for its short name.
+pub fn email(config_dir: &Path, home: &Path) -> Option<String> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(claude_json(config_dir, home)).ok()?).ok()?;
+    text(&v, "oauthAccount", "emailAddress")
+}
+
+/// A short name for each account, for the rows that list them all: the
+/// sign-in's email domain ("example.com") when no other account has the same
+/// one, else `None`, and the caller shows the folder (two accounts on one
+/// domain, or one login in two organizations, still read apart).
+pub fn labels(emails: &[Option<String>]) -> Vec<Option<String>> {
+    let domains: Vec<Option<String>> = emails
+        .iter()
+        .map(|e| e.as_deref().map(|e| e.rsplit_once('@').map_or(e, |(_, d)| d).to_ascii_lowercase()))
+        .collect();
+    domains
+        .iter()
+        .map(|d| d.clone().filter(|d| domains.iter().filter(|o| o.as_deref() == Some(d.as_str())).count() == 1))
+        .collect()
+}
+
 /// This computer's accounts and who each is signed in as.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct IdentityMap {
@@ -181,6 +203,15 @@ mod tests {
             (id(Some("u-z"), None, None), None),
             (Identity::default(), None),
         ];
+        // Short names: the email domain while no other account shares it.
+        let mail = |e: &str| Some(e.to_owned());
+        let names = labels(&[mail("me@Acme.ai"), mail("a@x.test"), mail("b@x.test"), None]);
+        assert_eq!(names, [Some("acme.ai".into()), None, None, None]);
+        assert_eq!(
+            email(&home.join(".claude"), &home).as_deref(),
+            Some("a@x.test"),
+            "the default dir's ~/.claude.json"
+        );
         // A hub_accounts hint names an account by email or id.
         assert_eq!(map.lookup(&Identity::from_hint("B@X.test")), Some(home.join(".claude-b").as_path()));
         assert_eq!(map.lookup(&Identity::from_hint("u-z")), None);
