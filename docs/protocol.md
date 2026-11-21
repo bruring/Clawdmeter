@@ -31,8 +31,8 @@ ends an alert, so the app clears its corresponding alert too. The app expires
 an alert nothing cleared after the same 2 minutes (a test alert after 30
 seconds) and sends `x` if the device still shows it.
 It sends `{"acct":"next"}` on TX to peek at the next of the app's accounts
-(the next-account button, `k` preset 7); the app also takes
-`{"acct":"prev"}`, for swipes to come. The app then sends that account's
+(a swipe to the left on a touch panel, or the next-account button, `k` preset
+7) and `{"acct":"prev"}` for the previous one (a swipe to the right). The app then sends that account's
 numbers as replays (`rp:1`, with its `an`/`ap`) for 30 seconds after the last
 request, round the list of accounts with numbers, and goes back to the shown
 account after that or when a step lands on it. A peek never changes the account the app

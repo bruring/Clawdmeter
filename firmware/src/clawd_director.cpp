@@ -9,6 +9,7 @@
 #include "minimal_mode.h"
 #include "hal/board_caps.h"
 #include "usage_rate.h"
+#include "swipe.h"
 #include <Arduino.h>
 #include <lvgl.h>
 #include <string.h>
@@ -293,11 +294,39 @@ void director_set_liveliness(int level) {
     mascot_autonomy(beat == B_HOME && !minimal && t.idle_acts);
 }
 
+// Where and when the finger went down, and a swipe not yet taken by main.
+static lv_point_t press_at = { 0, 0 };
+static uint32_t press_ms = 0;
+static int pending_swipe = 0;
+
+// A finger on the panel: on release, a quick horizontal swipe asks for
+// another account (`director_take_swipe`), anything else is a tap where it
+// went down. Taps land on release so a swipe is never also a tap.
 static void indev_cb(lv_event_t* e) {
-    (void)e;
+    const lv_event_code_t code = lv_event_get_code(e);
     lv_point_t p = { 0, 0 };
     if (touch_indev) lv_indev_get_point(touch_indev, &p);
-    director_tap(p.x);
+    if (code == LV_EVENT_PRESSED) {
+        press_at = p;
+        press_ms = now_ms();
+        return;
+    }
+    if (code != LV_EVENT_RELEASED) return;
+    const int step = swipe_step(p.x - press_at.x, p.y - press_at.y, now_ms() - press_ms,
+                                lv_display_get_horizontal_resolution(NULL));
+    if (step) {
+        engage();
+        pending_swipe = step;
+        Serial.printf("[%lu] director: swipe %s\n", (unsigned long)now_ms(), step > 0 ? "left (next account)" : "right (previous account)");
+        return;
+    }
+    director_tap(press_at.x);
+}
+
+int director_take_swipe(void) {
+    const int s = pending_swipe;
+    pending_swipe = 0;
+    return s;
 }
 
 void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
@@ -375,10 +404,13 @@ void director_init(void) {
     last_engagement = now_ms();
     apply_minimal(minimal_mode());
     go(B_HOME);
-    // Every press on the panel, wherever it lands, is a tap for the
-    // director. PRESSED (not CLICKED) so the reaction starts on the next frame.
+    // Every touch on the panel, wherever it lands, is a tap for the director
+    // or a swipe (`indev_cb`): the press notes where, the release decides.
     touch_indev = lv_indev_get_next(NULL);
-    if (touch_indev) lv_indev_add_event_cb(touch_indev, indev_cb, LV_EVENT_PRESSED, NULL);
+    if (touch_indev) {
+        lv_indev_add_event_cb(touch_indev, indev_cb, LV_EVENT_PRESSED, NULL);
+        lv_indev_add_event_cb(touch_indev, indev_cb, LV_EVENT_RELEASED, NULL);
+    }
 }
 
 DirectorRoom director_room(void) { return face_visible() ? ROOM_FACE : ROOM_METERS; }

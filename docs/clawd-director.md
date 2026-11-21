@@ -29,8 +29,12 @@ what you want (see "A tap on the meters" below).
 / `e:"b"`) also calls `idle_note_activity()` first, so a dimmed or dark panel
 fades back in before he notices you; an alert already did. A Stop or tool
 activity does not wake the panel: Claude working alone isn't you. Taps come straight
-from LVGL: an indev `LV_EVENT_PRESSED` callback, so the reaction starts on the
-next frame, not on release.
+from LVGL: indev `LV_EVENT_PRESSED` notes where the finger went down and
+`LV_EVENT_RELEASED` decides. A quick horizontal swipe (`swipe.h`: a quarter of
+the panel, under 0.8 s) asks the app for another account
+(`director_take_swipe`, sent by `main.cpp` as `{"acct":"next"|"prev"}`);
+anything else is a tap where it went down. So a tap acts on release, and a
+swipe is never also a tap.
 
 ## Rooms
 
@@ -232,7 +236,7 @@ also wakes the screensaver, which covers the slow-clock-only case.
 |---|---|
 | Anticipation | Pointing before a show and on a prompt, a blink before the face drops on a wake, the face's crouch-and-hop before it drops, a beat before the run-off, a turn toward the edge (walking intro frames) before every exit. |
 | Follow-through, overlapping action | The face's eyes lag its body, vertically, so they reach rest a beat later. |
-| Timing | Taps act on `LV_EVENT_PRESSED`. `performer_release()` snaps to the idle pose in the same frame. |
+| Timing | Taps act on `LV_EVENT_RELEASED` (a swipe isn't a tap). `performer_release()` snaps to the idle pose in the same frame. |
 | Secondary action | `clawd_jitter` for idle gaps, `clawd_pick_no_repeat` for acts and scenes, `face_plan_next` for irregular and double blinks and glances. |
 | Staging | The meters hold still while he performs behind them (only the clock and the status line tick), and there's one actor at a time. |
 | Slow in, slow out | Ease-out into the face's overshoot, ease-in for its fall, the run-off's speed ramp. Walks begin on intro frames and end on the outro. |

@@ -33,6 +33,7 @@ void director_on_payload(const UsageData* d, const SignalsUpdate* sig);
 void director_alert(const char* message);   // attention hook fired
 void director_alert_clear(void);            // the session moved on
 bool director_take_dismissed(void);         // an alert ended on the device since the last call
+int  director_take_swipe(void);             // a swipe since the last call: +1 next account, -1 previous, 0 none
 
 // Any touch press at screen x (wired internally to LVGL). On the meters it's
 // tapping the aquarium: the face comes up, curious, for a while (a tap on it
