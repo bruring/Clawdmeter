@@ -6,8 +6,30 @@
 //! reset (a drop) is not activity. Before any rise, the highest current %
 //! wins, whatever each one measures: the account nearest its own limit.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::hash::Hash;
+
+/// A prompt this recent picks its account over the rise rule.
+pub const PROMPT_WINDOW_SECS: i64 = 600;
+/// The shown account keeps the device while its own last prompt is this
+/// recent, so prompts in two accounts (two hosts) don't flip it back and forth.
+pub const PROMPT_HOLD_SECS: i64 = 300;
+
+/// The account the user is prompting in, by each account's latest prompt
+/// (`prompts`, unix s): `current` while its own prompt is within
+/// [`PROMPT_HOLD_SECS`], else the newest prompt within
+/// [`PROMPT_WINDOW_SECS`]. `None` when no prompt is that recent: the rise
+/// rule decides.
+pub fn prompt_choice<K: Ord + Clone>(prompts: &BTreeMap<K, i64>, current: Option<&K>, now: i64) -> Option<K> {
+    if let Some(c) = current.filter(|c| prompts.get(*c).is_some_and(|t| now - t <= PROMPT_HOLD_SECS)) {
+        return Some(c.clone());
+    }
+    prompts
+        .iter()
+        .filter(|(_, t)| now - **t <= PROMPT_WINDOW_SECS)
+        .max_by_key(|(k, t)| (**t, std::cmp::Reverse((*k).clone())))
+        .map(|(k, _)| k.clone())
+}
 
 /// Sticky "most recently moved" selector.
 #[derive(Debug, Clone)]
@@ -66,6 +88,24 @@ mod tests {
 
     const A: &str = "/a";
     const B: &str = "/b";
+
+    #[test]
+    fn prompts_pick_the_account() {
+        let p = |v: &[(&'static str, i64)]| v.iter().copied().collect::<BTreeMap<_, _>>();
+        // (latest prompts, current, now, choice)
+        let cases = [
+            (p(&[(A, 1_000), (B, 1_100)]), None, 1_200, Some(B)),
+            // The shown account keeps it while its own prompt is recent.
+            (p(&[(A, 1_000), (B, 1_100)]), Some(A), 1_200, Some(A)),
+            (p(&[(A, 1_000), (B, 1_100)]), Some(A), 1_000 + PROMPT_HOLD_SECS + 1, Some(B)),
+            // Too old: the rise rule decides.
+            (p(&[(A, 1_000)]), None, 1_000 + PROMPT_WINDOW_SECS + 1, None),
+            (p(&[]), Some(A), 1_000, None),
+        ];
+        for (prompts, current, now, want) in cases {
+            assert_eq!(prompt_choice(&prompts, current.as_ref(), now), want, "{prompts:?} {current:?} {now}");
+        }
+    }
 
     #[test]
     fn startup_picks_highest() {

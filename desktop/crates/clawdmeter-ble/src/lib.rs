@@ -395,6 +395,9 @@ pub enum DeviceEvent {
     /// TX `{"dismiss":true}`: the alert ended on the device (a tap, or its
     /// own timeout).
     Dismissed,
+    /// TX `{"acct":"next"}` (1) or `{"acct":"prev"}` (-1): a swipe or the
+    /// next-account button asks to see another account.
+    Account(i32),
 }
 
 /// The device's events, in order.
@@ -410,6 +413,12 @@ pub fn device_event(uuid: Uuid, value: &[u8]) -> Option<DeviceEvent> {
         return None;
     }
     let text: String = std::str::from_utf8(value).ok()?.chars().filter(|c| !c.is_whitespace()).collect();
+    if text.contains("\"acct\":\"next\"") {
+        return Some(DeviceEvent::Account(1));
+    }
+    if text.contains("\"acct\":\"prev\"") {
+        return Some(DeviceEvent::Account(-1));
+    }
     text.contains("\"dismiss\":true").then_some(DeviceEvent::Dismissed)
 }
 
@@ -864,6 +873,8 @@ mod tests {
         assert_eq!(device_event(TX_UUID, br#"{ "dismiss": true }"#), Some(DeviceEvent::Dismissed));
         assert_eq!(device_event(TX_UUID, br#"{"ack":true}"#), None);
         assert_eq!(device_event(TX_UUID, br#"{"err":true}"#), None);
+        assert_eq!(device_event(TX_UUID, br#"{"acct":"next"}"#), Some(DeviceEvent::Account(1)));
+        assert_eq!(device_event(TX_UUID, br#"{ "acct": "prev" }"#), Some(DeviceEvent::Account(-1)));
         assert_eq!(device_event(TX_UUID, &[0xff, 0xfe]), None);
         assert_eq!(device_event(RX_UUID, br#"{"dismiss":true}"#), None);
         // The firmware's reply, as written.
@@ -872,6 +883,7 @@ mod tests {
         )
         .unwrap();
         assert!(src.contains(r#"tx_char->setValue("{\"dismiss\":true}");"#));
+        assert!(src.contains(r#"{\"acct\":\"next\"}"#) && src.contains(r#"{\"acct\":\"prev\"}"#));
     }
 
     #[test]

@@ -254,6 +254,25 @@ Windows menu. Clawdmeter only reads them; it never uses one. The endpoint
 answers only Claude Code's own User-Agent, so that one call sends it. It's
 read-only, but Anthropic may stop answering it or object to it.
 
+**Following the account in use, and peeking at the others.** With several
+accounts and the device on **Latest active account**, a prompt in one of
+them moves the device to it at once. It doesn't flip back and forth while
+you work in two: the shown account keeps the device while its own last
+prompt is under 5 minutes old, and a prompt counts for 10 minutes. Without
+recent prompts the device follows the account whose usage rose last, as
+before.
+
+The device's title names the account it shows and its place, such as
+`acme 2/3` (with the clock off). To look at another account without
+changing anything, give a button the **Next account** action on the Device
+page. A press shows the next account's numbers for 30 seconds, another press
+moves on round the list, and the press that comes back to the device's own
+account (or the 30 seconds) ends it. Update the board together with the app:
+older firmware can't tell accounts apart and may read a switch as a reset
+(the reset chime, if it's on). A peek
+never changes which account the device follows, and its numbers never count
+as usage on the device. Touch swipes are planned.
+
 **Every account at a glance.** With two or more accounts, the Overview has
 an **Accounts** card and the tray lists one row per account under the meters.
 Each row shows the account's name, its usage and when its week resets, and

@@ -133,12 +133,21 @@ pub struct Payload {
     /// device keeps the last value it got.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fc: Option<Rgb>,
+    /// Which account the numbers are, with two or more accounts: its short
+    /// name (ASCII, at most 12: "acme"). The device labels it and restarts
+    /// its rate math when it changes, so a switch isn't read as usage.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub an: Option<String>,
+    /// That account's place among them and the count, `[index, count]`, for
+    /// the device's page dots.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ap: Option<[u32; 2]>,
 }
 
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc",
+    "a", "e", "es", "n", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc", "an", "ap",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -644,7 +653,9 @@ mod tests {
     #[test]
     fn widest_payload_fits() {
         let chord = 0x1_1F73; // hold, all four modifiers, F24
-        let pl = Payload {
+                              // Every field a write can carry, at its widest; the shapes below take
+                              // away what can't come together.
+        let all = Payload {
             s: Some(100),
             sr: Some(300),
             w: Some(100),
@@ -678,10 +689,21 @@ mod tests {
             k3: Some(chord),
             th: Some(Palette::default()),
             fc: Some(Palette::default().fable()),
+            an: Some("globex-inc".into()),
+            ap: Some([9, 10]),
         };
-        let json = pl.to_json();
-        assert!(json.len() < 500, "{} bytes: {json}", json.len());
-        assert_eq!(pl.encode(500), json.into_bytes());
+        // A Codex account never carries Fable (`wf`, `fc`); a Claude one never
+        // `pv`; a spend cap (`ent`) has its period and no reset credits.
+        let shapes = [
+            ("codex week", Payload { wf: None, fc: None, tp: None, pd: None, rd: None, ..all.clone() }),
+            ("claude week with grants", Payload { pv: None, tp: None, pd: None, rd: None, ..all.clone() }),
+            ("spend cap", Payload { pv: None, rc: None, rx: None, acct: Some("ent".into()), ..all.clone() }),
+        ];
+        for (what, pl) in shapes {
+            let json = pl.to_json();
+            assert!(json.len() < 500, "{what}: {} bytes: {json}", json.len());
+            assert_eq!(pl.encode(500), json.into_bytes(), "{what}: nothing trimmed");
+        }
     }
 
     #[test]
@@ -720,6 +742,8 @@ mod tests {
             k3: Some(6),
             th: Some(Palette::default()),
             fc: Some(Palette::default().fable()),
+            an: Some("acme".into()),
+            ap: Some([0, 3]),
         };
         let v: serde_json::Map<String, serde_json::Value> = serde_json::from_str(&pl.to_json()).unwrap();
         // serde_json's Map is sorted without preserve_order; check membership.

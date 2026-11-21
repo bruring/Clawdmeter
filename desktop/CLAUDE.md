@@ -143,11 +143,12 @@ is faked behind `FlashHardware`.
   reconnect's resend of an account the board last had only as a replay
   (`polled_account`); a switch made by that account's own fresh poll is a
   poll, as automatic switches always were. The app's rate tracker starts
-  over on another Claude account's numbers (`rate_account`). The board can't
+  over on another Claude account's numbers (`rate_account`). Firmware with
+  `an` restarts its rate ring when the account changes. Older firmware can't
   tell accounts apart: another Claude account's next real poll reaches its
   rate ring, so a drop over 5 points reads as a reset there (chime if on, and
-  Clawd's reaction) and a rise as heavy use, as automatic switches always
-  did. Known gap: the shown account's cadence follows every account's
+  Clawd's reaction) and a rise as heavy use. Following prompts switches more
+  often than the rise rule did, so update the board with the app. Known gap: the shown account's cadence follows every account's
   prompts, so a chosen account with a window running is probed as often as
   every 2 min while another account works),
   `claude_resets` (default off; Settings → "Show Claude's free limit resets"):
@@ -166,6 +167,15 @@ is faked behind `FlashHardware`.
   show them like Codex credits (`StatusSnapshot::shown_resets`: weekly-only,
   not spend). `oauth::honest_user_agent` still pins every other call to
   `clawdmeter/<version>`.
+  Accounts on the device: with two or more, every data write carries `an`
+  (`engine::device_label`: the short name's first part, else the folder) and
+  `ap` (`[index, count]` in `Settings::accounts` order). The automatic choice
+  follows prompts (`selector::prompt_choice`, from attributed `UserPromptSubmit`
+  hook events: newest within 10 min, the shown account held while its own is
+  under 5 min), before the rise rule. `Engine::peek` (TX `{"acct":"next"|"prev"}`,
+  `DeviceEvent::Account`, the `next-account` button preset 7) shows another
+  account's numbers as `rp:1` replays for `PEEK_SECS` (30 s); a poll of the
+  shown account waits and goes out as a poll afterwards.
   `poll_interval`, `heartbeat_interval`,
   `reset_chime` and `alert_chime` (device chimes; the old `chime` / `beep`
   keys are read when these are absent), `desktop_chime` (the same ding on

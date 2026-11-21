@@ -417,6 +417,12 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                         log::info!("attention alert dismissed on the device");
                         engine.on_device_dismissed();
                     }
+                    DeviceEvent::Account(step) => match engine.peek(step, now) {
+                        Some(d) => {
+                            log::info!("device peeks at {} for {}s", d.display(), clawdmeter_core::engine::PEEK_SECS)
+                        }
+                        None => log::info!("device back on the shown account"),
+                    },
                 }
             }
         }
@@ -652,6 +658,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             }
         }
 
+        engine.set_labels(labels.names.clone());
         let _ = status.send(Status {
             link: link_state.clone(),
             engine: engine.status(now),

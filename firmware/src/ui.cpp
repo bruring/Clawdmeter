@@ -525,6 +525,28 @@ void ui_set_pair_hint(PairHint hint) {
     apply_pair_text();
 }
 
+// With several accounts (the app's `an`/`ap`) the title names the one shown,
+// "acme 2/3", or the name alone (cut to fit) where that doesn't fit; "Usage"
+// without `an`. The clock keeps the title while it's on.
+static void apply_account_title(const UsageData* d) {
+    if (clock_base_epoch > 0 || !L.title_font[0]) return;
+    static char buf[24];
+    const char* text = "Usage";
+    if (d->account[0]) {
+        if (d->account_count > 1)
+            snprintf(buf, sizeof(buf), "%s %d/%d", d->account, d->account_idx + 1, d->account_count);
+        else
+            snprintf(buf, sizeof(buf), "%s", d->account);
+        // Too wide: the name alone, cut until it fits (never below three letters).
+        if (layout_text_width(L.title_font[0], buf) > L.title_room) {
+            snprintf(buf, sizeof(buf), "%s", d->account);
+            for (size_t n = strlen(buf); n > 3 && layout_text_width(L.title_font[0], buf) > L.title_room;) buf[--n] = '\0';
+        }
+        if (layout_text_width(L.title_font[0], buf) <= L.title_room) text = buf;
+    }
+    if (strcmp(lv_label_get_text(lbl_title), text) != 0) lv_label_set_text(lbl_title, text);
+}
+
 // The title's font follows the clock format (a 12-hour clock may need a
 // smaller one); hidden where the header has no room for it at all.
 static void apply_title_font(void) {
@@ -976,6 +998,7 @@ void ui_update(const UsageData* data) {
         lv_label_set_text(lbl_title, "Usage");
         apply_title_font();
     }
+    apply_account_title(data);
 
     int s_pct = (int)(data->session_pct + 0.5f);
     const bool resets_card = shows_resets_card(data);

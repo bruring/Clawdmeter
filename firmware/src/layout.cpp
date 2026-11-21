@@ -246,6 +246,7 @@ static void fit_title(Layout& L, const Chrome& c) {
     const int16_t left = L.title_cx - (L.logo_x + logo_w(L));
     const int16_t right = L.batt_x - L.title_cx;
     const int16_t room = 2 * ((left < right ? left : right) - TITLE_GAP);
+    L.title_room = room;
     for (int fmt = 0; fmt < 2; fmt++) {
         L.title_font[fmt] = nullptr;
         for (int i = c.title_font; i < TITLE_FONT_COUNT; i++) {

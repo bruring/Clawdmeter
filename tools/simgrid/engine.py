@@ -263,7 +263,10 @@ class Engine:
         if not self.connected:
             return
         p = dict(self.state)
-        p["t"] = CLOCK_EPOCH + self.now // 1000
+        # The app's clock, unless the script set `t` itself (`payload t=0`:
+        # the clock off, as the app sends no `t` then).
+        if "t" not in self.state:
+            p["t"] = CLOCK_EPOCH + self.now // 1000
         if replay:
             p["rp"] = 1
         if extra:

@@ -199,6 +199,37 @@ pub struct Engine {
     /// Claude accounts' limit-reset grants (`crate::grants`), put on each
     /// of their readings.
     claude_resets: BTreeMap<PathBuf, crate::usage::ResetCredits>,
+    /// Each Claude account's latest prompt (unix s), from attributed hook
+    /// events: the automatic choice follows the account in use
+    /// ([`crate::selector::prompt_choice`]).
+    last_prompt: BTreeMap<PathBuf, i64>,
+    /// The latest `now` any call has seen, for choices made without one.
+    now_seen: i64,
+    /// The account the device is peeking at (a swipe or the next-account
+    /// button), until when: its numbers go out as replays instead of the
+    /// shown account's ([`Engine::peek`]).
+    peek: Option<(PathBuf, i64)>,
+    /// The peek moved and the device hasn't got it yet.
+    peek_dirty: bool,
+    /// Short names for the accounts that have one (the sign-in's email
+    /// domain), for `an`.
+    labels: Vec<(PathBuf, String)>,
+}
+
+/// How long a peek at another account lasts without another swipe.
+pub const PEEK_SECS: i64 = 30;
+
+/// The account's name on the device (`an`): the first part of its short
+/// name ("acme" from "acme.ai", "globex" from "globex-inc.com"), else its folder without the leading
+/// ".claude-" ("globex", "claude" for "~/.claude"); ASCII, at most 12.
+pub fn device_label(dir: &Path, label: Option<&str>) -> String {
+    let folder = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let folder = folder.trim_start_matches('.');
+    let name = match label.filter(|l| !l.is_empty()) {
+        Some(l) => l.split(['.', '-']).next().unwrap_or(l).to_owned(),
+        None => folder.strip_prefix("claude-").unwrap_or(folder).to_owned(),
+    };
+    name.chars().filter(|c| c.is_ascii_graphic()).take(12).collect()
 }
 
 /// A Codex account that can't be read until its sign-in is renewed: no
@@ -251,6 +282,116 @@ impl Engine {
             claude_found: true,
             desktop_chime_due: false,
             claude_resets: BTreeMap::new(),
+            last_prompt: BTreeMap::new(),
+            now_seen: 0,
+            peek: None,
+            peek_dirty: false,
+            labels: Vec::new(),
+        }
+    }
+
+    /// Short names for the accounts (the daemon's, from their sign-ins).
+    pub fn set_labels(&mut self, labels: Vec<(PathBuf, String)>) {
+        self.labels = labels;
+    }
+
+    /// `an` and `ap` for `dir`: its device label, and its place among the
+    /// accounts with the count. `None` with fewer than two accounts.
+    fn account_key(&self, dir: &Path) -> Option<(String, [u32; 2])> {
+        let list: Vec<&PathBuf> = self.settings.accounts().map(|(d, _)| d).collect();
+        if list.len() < 2 {
+            return None;
+        }
+        let i = list.iter().position(|d| d.as_path() == dir)?;
+        // Names must tell the accounts apart (the device restarts its rate
+        // math on a new name): a shared one falls back to the folder, then
+        // gets the account's place appended.
+        let label_of = |d: &Path| self.labels.iter().find(|(l, _)| l == d).map(|(_, l)| l.as_str());
+        let named: Vec<String> = list.iter().map(|d| device_label(d, label_of(d))).collect();
+        let folders: Vec<String> = list.iter().map(|d| device_label(d, None)).collect();
+        let unique = |names: &[String], n: &str| names.iter().filter(|x| *x == n).count() == 1;
+        let name = if unique(&named, &named[i]) {
+            named[i].clone()
+        } else if unique(&folders, &folders[i]) && named.iter().enumerate().all(|(j, x)| j == i || *x != folders[i]) {
+            folders[i].clone()
+        } else {
+            let n = (i + 1).to_string();
+            format!("{}{n}", folders[i].chars().take(12 - n.len()).collect::<String>())
+        };
+        Some((name, [i as u32, list.len() as u32]))
+    }
+
+    /// The device asked for the next (`step` 1) or previous (-1) account
+    /// (a swipe, or the next-account button): peek at it for [`PEEK_SECS`],
+    /// among the accounts with numbers, in [`Settings::accounts`] order,
+    /// round the list. A step back onto the shown account ends the peek.
+    /// The shown account and the device setting don't change, and a peek's
+    /// numbers go out as replays, so they never reach the rate math.
+    /// Returns the account peeked at.
+    pub fn peek(&mut self, step: i32, now: i64) -> Option<PathBuf> {
+        let list: Vec<PathBuf> = self
+            .settings
+            .accounts()
+            .map(|(d, _)| d.clone())
+            .filter(|d| self.accounts.get(d).is_some_and(|a| a.last.is_some()))
+            .collect();
+        if list.is_empty() {
+            self.end_peek();
+            return None;
+        }
+        // Round the list: from the account on screen (the peek's, else the
+        // shown one) one step on; landing on the shown account ends the peek.
+        let from = self.peek.as_ref().map(|(d, _)| d.clone()).or_else(|| self.active.clone());
+        let len = list.len() as i64;
+        let next = match from.as_ref().and_then(|f| list.iter().position(|d| d == f)) {
+            Some(i) => (i as i64 + i64::from(step)).rem_euclid(len),
+            None if step >= 0 => 0,
+            None => len - 1,
+        };
+        let target = list.get(next as usize).filter(|d| Some(*d) != self.active.as_ref()).cloned();
+        match target {
+            Some(d) => {
+                self.peek = Some((d.clone(), now + PEEK_SECS));
+                self.peek_dirty = true;
+                Some(d)
+            }
+            None => {
+                self.end_peek();
+                None
+            }
+        }
+    }
+
+    /// The account being peeked at, if any.
+    pub fn peeking(&self) -> Option<&Path> {
+        self.peek.as_ref().map(|(d, _)| d.as_path())
+    }
+
+    /// Back to the shown account: its numbers go out again, as a replay
+    /// unless a poll of it is waiting.
+    fn end_peek(&mut self) {
+        if self.peek.take().is_some() {
+            self.peek_dirty = false;
+            if !self.fresh_poll {
+                self.shown_changed = true;
+            }
+        }
+    }
+
+    /// Choose again after a prompt: the automatic choice may move to the
+    /// account in use. A switch goes out as a replay.
+    fn reselect(&mut self) {
+        let prev = self.active.clone();
+        self.auto_active = self.pick_auto();
+        let shown = self.shown_choice();
+        if shown != prev {
+            if let Some(a) = &shown {
+                log::info!("active plan: {} (prompted)", a.display());
+            }
+            self.shown_changed |= shown.is_some();
+            // A poll still waiting was the previous account's.
+            self.fresh_poll = false;
+            self.active = shown;
         }
     }
 
@@ -327,6 +468,10 @@ impl Engine {
         if accounts_changed {
             let listed = &self.settings.config_dirs;
             self.claude_resets.retain(|d, _| listed.contains(d));
+            self.last_prompt.retain(|d, _| listed.contains(d));
+            if self.peek.as_ref().is_some_and(|(p, _)| !self.settings.accounts().any(|(d, _)| d == p)) {
+                self.end_peek();
+            }
         }
         if !self.settings.claude_resets {
             let dirs: Vec<PathBuf> = self.claude_resets.keys().cloned().collect();
@@ -364,8 +509,10 @@ impl Engine {
 
     /// One live hook event.
     pub fn on_hook_event(&mut self, ev: &HookEvent, now: i64) {
+        self.now_seen = self.now_seen.max(now);
+        let attributed = ev.account.as_ref().and_then(|a| self.settings.config_dirs.iter().find(|d| *d == a)).cloned();
         if ev.kind.sends_messages() {
-            match ev.account.as_ref().and_then(|a| self.settings.config_dirs.iter().find(|d| *d == a)) {
+            match &attributed {
                 Some(d) => self.accounts.entry(d.clone()).or_default().note_activity(ev.ts),
                 None => self.unattributed_activity = self.unattributed_activity.max(Some(ev.ts)),
             }
@@ -374,6 +521,10 @@ impl Engine {
             Signal::Prompt { .. } => {
                 self.scheduler.on_prompt(now);
                 self.last_event_ts = Some(now);
+                if let Some(d) = attributed {
+                    self.last_prompt.insert(d, ev.ts);
+                    self.reselect();
+                }
             }
             Signal::Stop => {
                 self.scheduler.on_stop(now);
@@ -628,10 +779,14 @@ impl Engine {
         let polled = !results.is_empty();
         let in_flight = self.in_flight.clone();
         let (ok_dirs, rekinded) = self.record_results(now, results, &in_flight);
+        let shown_before = self.active.clone();
         let active_fresh = self.choose_active(now, &ok_dirs, &rekinded);
         self.in_flight.clear();
         self.logged_out = self.all_auth();
-        self.fresh_poll = active_fresh || (self.logged_out && polled);
+        // A poll of the shown account still waiting for a peek to end stays
+        // waiting, while that account is still the one shown.
+        let waiting = self.fresh_poll && self.peek.is_some() && self.active == shown_before;
+        self.fresh_poll = active_fresh || (self.logged_out && polled) || waiting;
     }
 
     /// Store each account's result. Returns the accounts that answered and
@@ -690,6 +845,7 @@ impl Engine {
     /// Pick the shown account after new results. Returns whether it has
     /// numbers read in this cycle (a real poll).
     fn choose_active(&mut self, now: i64, ok_dirs: &[PathBuf], rekinded: &[PathBuf]) -> bool {
+        self.now_seen = self.now_seen.max(now);
         let prev_active = self.active.clone();
         // The selector runs with an account chosen too, so going back to
         // automatic picks up from the latest rise.
@@ -744,7 +900,15 @@ impl Engine {
         let sessions: Vec<(PathBuf, u32)> =
             self.accounts.iter().filter_map(|(k, a)| a.last.as_ref().map(|r| (k.clone(), r.session_pct()))).collect();
         let codex = &self.settings.codex_dirs;
-        self.selector.choose_preferring(&sessions, |k| !codex.contains(k))
+        let by_rise = self.selector.choose_preferring(&sessions, |k| !codex.contains(k));
+        // A recent prompt picks its account first (one with numbers to show).
+        let prompted: BTreeMap<PathBuf, i64> = self
+            .last_prompt
+            .iter()
+            .filter(|(d, _)| self.accounts.get(*d).is_some_and(|a| a.last.is_some()))
+            .map(|(d, t)| (d.clone(), *t))
+            .collect();
+        crate::selector::prompt_choice(&prompted, self.auto_active.as_ref(), self.now_seen).or(by_rise)
     }
 
     /// The account to show: the one chosen for the device
@@ -778,6 +942,15 @@ impl Engine {
     /// The next write, if one is due. Call [`Engine::mark_written`] after a
     /// successful write; on failure just call this again next tick.
     pub fn next_write(&mut self, now: i64, host: HostClock) -> Option<Write> {
+        self.now_seen = self.now_seen.max(now);
+        // The peek ran out, or the account peeked at lost its numbers.
+        if self
+            .peek
+            .as_ref()
+            .is_some_and(|(d, until)| now >= *until || self.accounts.get(d).is_none_or(|a| a.last.is_none()))
+        {
+            self.end_peek();
+        }
         self.activity.prune(now);
         let level = self.activity.level(now);
         let sessions = self.activity.sessions_active(now);
@@ -807,17 +980,26 @@ impl Engine {
             }
             (Payload::no_data(), WriteKind::NoData)
         } else {
-            // Nothing to show until the first good poll.
-            let reading = self.active_reading()?.clone();
+            // Nothing to show until the first good poll. A peek shows the
+            // account peeked at.
+            let peeked = self.peek.as_ref().and_then(|(d, _)| self.accounts.get(d)).and_then(|a| a.last.clone());
+            let reading = match peeked {
+                Some(r) => r,
+                None => self.active_reading()?.clone(),
+            };
+            let peeking = self.peek.is_some();
             // Right after a switch the device gets the shown account's
             // numbers as a replay first, even fresh ones (a poll still
             // waiting from before the switch, or a reconnect's resend): the
             // jump from another account's numbers isn't usage.
-            let kind = if self.fresh_poll && !self.shown_changed {
+            let kind = if self.fresh_poll && !self.shown_changed && !peeking {
                 WriteKind::Poll
             } else if self.attention.pending() {
                 WriteKind::Attention
-            } else if (new_event || a_changed || n_changed || prefs_changed) && !self.stale(now) || self.shown_changed {
+            } else if (new_event || a_changed || n_changed || prefs_changed) && !self.stale(now)
+                || self.shown_changed
+                || self.peek_dirty
+            {
                 // Any ok payload refreshes the device's DATA_FRESH_MS, so
                 // while the numbers are stale only alerts and polls go out
                 // and the device can show its stale state. A switch goes out
@@ -850,6 +1032,13 @@ impl Engine {
             if p.pv.is_none() {
                 p.fc = Some(th.fable());
             }
+            // Which account the numbers are, with two or more: its name and
+            // place, so the device can label it and restart its rate math.
+            let shown = self.peek.as_ref().map(|(d, _)| d.clone()).or_else(|| self.active.clone());
+            if let Some((an, ap)) = shown.as_deref().and_then(|d| self.account_key(d)) {
+                p.an = Some(an);
+                p.ap = Some(ap);
+            }
             (p, kind)
         };
 
@@ -877,7 +1066,15 @@ impl Engine {
     /// The write from [`Engine::next_write`] reached the device.
     pub fn mark_written(&mut self, now: i64, w: &Write) {
         self.last_write = Some(now);
-        self.fresh_poll = false;
+        // A peek's write leaves the shown account's pending poll and switch
+        // for when the peek ends.
+        let peeking = self.peek.is_some();
+        self.peek_dirty = false;
+        // A peek's replay leaves a poll of the shown account waiting; "no
+        // data" ends it whatever.
+        if !peeking || w.kind == WriteKind::NoData {
+            self.fresh_poll = false;
+        }
         if w.payload.b.is_some() || w.payload.m.is_some() || w.payload.x.is_some() || self.attention.pending() {
             self.attention.mark_sent();
         }
@@ -914,6 +1111,11 @@ impl Engine {
         }
         // The switch reached the device: the shown account's numbers, or
         // "no data", after which it shows no account's.
+        // A switch made during a peek goes out when it ends (`end_peek`), as a
+        // replay: a poll still waiting was the previous account's.
+        if peeking && self.shown_changed {
+            self.fresh_poll = false;
+        }
         self.shown_changed = false;
         if w.kind == WriteKind::Poll {
             self.polled_account = self.active.clone();
@@ -1871,6 +2073,75 @@ mod tests {
         assert_eq!(e.status(T0 + 1301).active_account, Some(cx.clone()), "Codex rose last");
         let w = write(&mut e, T0 + 1301).unwrap();
         assert_eq!((w.kind, w.payload.rp, w.payload.pv.as_deref()), (WriteKind::Event, Some(1), Some("codex")));
+    }
+
+    // A peek (a swipe or the next-account button) shows another account's
+    // numbers as replays with its `an`/`ap`, never moves the shown account,
+    // keeps a poll of it waiting, and ends after PEEK_SECS or on a step past
+    // the end. A prompt moves the automatic choice to its account.
+    #[test]
+    fn peeks_and_prompts() {
+        let mut e = Engine::new(settings(TWO));
+        let (a, b) = two();
+        e.on_poll_results(T0, vec![(a.clone(), Ok(reading(10))), (b.clone(), Ok(reading(30)))]);
+        let w = write(&mut e, T0).unwrap();
+        assert_eq!((w.payload.an.as_deref(), w.payload.ap), (Some("b"), Some([1, 2])), "the highest, by folder");
+
+        assert_eq!(e.peek(-1, T0 + 10), Some(a.clone()));
+        let w = write(&mut e, T0 + 10).unwrap();
+        assert_eq!(
+            (w.kind, w.payload.rp, w.payload.s, w.payload.an.as_deref()),
+            (WriteKind::Event, Some(1), Some(10), Some("claude"))
+        );
+        assert_eq!(e.status(T0 + 10).active_account, Some(b.clone()), "the shown account stays");
+        e.on_poll_results(T0 + 20, vec![(b.clone(), Ok(reading(31)))]);
+        assert!(write(&mut e, T0 + 20).is_none(), "the shown account's poll waits");
+        let w = write(&mut e, T0 + 10 + PEEK_SECS).unwrap();
+        assert_eq!(
+            (w.kind, w.payload.s, w.payload.an.as_deref()),
+            (WriteKind::Poll, Some(31), Some("b")),
+            "back after the peek, the waiting poll as a poll"
+        );
+
+        // "next" only (the button): round the list, back to the shown account.
+        assert_eq!(e.peek(1, T0 + 100), Some(a.clone()), "past the end, round to the first");
+        write(&mut e, T0 + 100).unwrap();
+        assert_eq!(e.peek(1, T0 + 101), None, "back on the shown account");
+        let w = write(&mut e, T0 + 101).unwrap();
+        assert_eq!((w.kind, w.payload.an.as_deref()), (WriteKind::Event, Some("b")));
+        // A switch during a peek, with a poll of the shown account waiting,
+        // goes out after the peek as a replay, never as a poll.
+        e.peek(1, T0 + 140);
+        e.on_poll_results(T0 + 141, vec![(b.clone(), Ok(reading(32)))]);
+        write(&mut e, T0 + 141).unwrap();
+        e.update_settings(settings(&format!("{TWO}device_account = ~/.claude\n")));
+        write(&mut e, T0 + 142).unwrap();
+        let w = write(&mut e, T0 + 140 + PEEK_SECS).unwrap();
+        assert_eq!((w.kind, w.payload.an.as_deref()), (WriteKind::Event, Some("claude")));
+        e.update_settings(settings(TWO));
+        let _ = write(&mut e, T0 + 149);
+        // A switch during a peek goes out once, not on every tick.
+        e.peek(1, T0 + 150);
+        write(&mut e, T0 + 150).unwrap();
+        e.update_settings(settings(&format!("{TWO}device_account = ~/.claude\n")));
+        let _ = write(&mut e, T0 + 151);
+        assert!(write(&mut e, T0 + 152).is_none(), "no write loop during a peek");
+        e.update_settings(settings(TWO));
+        e.peek(1, T0 + 160);
+        let _ = write(&mut e, T0 + 160 + PEEK_SECS);
+
+        let mut prompt = ev(T0 + 200, "UserPromptSubmit");
+        prompt.account = Some(a.clone());
+        e.on_hook_event(&prompt, T0 + 200);
+        assert_eq!(e.status(T0 + 200).active_account, Some(a.clone()), "the account in use");
+        let w = write(&mut e, T0 + 200).unwrap();
+        assert_eq!((w.payload.rp, w.payload.an.as_deref()), (Some(1), Some("claude")));
+        assert_eq!(device_label(Path::new("/h/.claude-globex"), None), "globex");
+        assert_eq!(device_label(Path::new("/h/.claude"), Some("acme.ai")), "acme");
+        assert_eq!(device_label(Path::new("/h/.claude-c"), Some("globex-inc.com")), "globex");
+        // Two accounts on one domain name: the device still tells them apart.
+        e.set_labels(vec![(a.clone(), "acme-a.com".into()), (b.clone(), "acme-b.com".into())]);
+        assert_eq!((e.account_key(&a).unwrap().0, e.account_key(&b).unwrap().0), ("claude".to_owned(), "b".to_owned()));
     }
 
     // A chosen account that can't be read (not yet, signed out, failing,

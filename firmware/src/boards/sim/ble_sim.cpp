@@ -149,6 +149,7 @@ void ble_send_ack(void)  {}
 void ble_send_nack(void) { printf("[sim] payload NACKed — check the scenario JSON\n"); }
 void ble_request_refresh(void) {}
 void ble_send_dismiss(void) { printf("[sim] TX {\"dismiss\":true}\n"); }
+void ble_send_account(int step) { printf("[sim] TX {\"acct\":\"%s\"}\n", step < 0 ? "prev" : "next"); }
 void ble_set_battery_level(int pct) { (void)pct; }
 
 void ble_keyboard_report(const uint8_t r[8]) {

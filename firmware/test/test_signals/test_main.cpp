@@ -142,6 +142,13 @@ static void test_meter_kind_change_is_not_a_reset(void) {
     u = signals_ingest_at(&later, 120 * MIN);
     TEST_ASSERT_FALSE(u.session_reset);
     TEST_ASSERT_FALSE(u.meter_kind_changed);
+    // Another of the app's accounts (`an`) isn't a reset either: 60 -> 2.
+    UsageData va = parse("{\"s\":0,\"sr\":-1,\"w\":60,\"wr\":7000,\"acct\":\"week\",\"an\":\"acme\",\"ok\":true}");
+    UsageData br = parse("{\"s\":0,\"sr\":-1,\"w\":2,\"wr\":9000,\"acct\":\"week\",\"an\":\"initech\",\"ok\":true}");
+    signals_ingest_at(&va, 130 * MIN);
+    u = signals_ingest_at(&br, 140 * MIN);
+    TEST_ASSERT_FALSE(u.session_reset);
+    TEST_ASSERT_TRUE(u.meter_kind_changed);
 }
 
 static void test_sessions_change(void) {

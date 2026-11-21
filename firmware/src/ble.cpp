@@ -638,6 +638,14 @@ void ble_send_dismiss(void) {
     }
 }
 
+void ble_send_account(int step) {
+    if (state == BLE_STATE_CONNECTED && tx_char) {
+        tx_char->setValue(step < 0 ? "{\"acct\":\"prev\"}" : "{\"acct\":\"next\"}");
+        tx_char->notify();
+        Serial.printf("BLE: asked for the %s account\n", step < 0 ? "previous" : "next");
+    }
+}
+
 void ble_set_battery_level(int pct) {
     if (!hid_dev || pct < 0) return;
     if (pct > 100) pct = 100;

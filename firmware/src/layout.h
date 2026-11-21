@@ -30,6 +30,7 @@ struct Layout {
     int16_t logo_x, logo_y;          // Clawd slot, top-left
     int16_t batt_x, batt_y;          // battery icon, top-left
     int16_t title_cx;                // title centre x
+    int16_t title_room;              // the title's width between the logo and the battery
     // Per clock format, the largest title font that fits between the logo
     // and the battery, and its top edge (a smaller font sits on the same
     // centre line): [0] "Usage" and the 24-hour clock, [1] the 12-hour

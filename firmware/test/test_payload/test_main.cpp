@@ -273,6 +273,27 @@ static void test_long_strings_truncate(void) {
 // Codex (a trial): `pv` names the provider, `rc` the reset credits held and
 // `rx` their expiry dates. Absent is -1 (unknown), never 0; the count clamps
 // to 0..999.
+// `an`/`ap`: which of the app's accounts, and its place; absent or out of
+// range reads as absent.
+static void test_account_name(void) {
+    UsageData d;
+    TEST_ASSERT_TRUE(payload_parse("{\"s\":1,\"ok\":true}", &d, nullptr));
+    TEST_ASSERT_EQUAL_STRING("", d.account);
+    TEST_ASSERT_EQUAL_INT(-1, d.account_count);
+    TEST_ASSERT_TRUE(payload_parse("{\"s\":1,\"an\":\"globex-inc\",\"ap\":[2,3],\"ok\":true}", &d, nullptr));
+    TEST_ASSERT_EQUAL_STRING("globex-inc", d.account);
+    TEST_ASSERT_EQUAL_INT(2, d.account_idx);
+    TEST_ASSERT_EQUAL_INT(3, d.account_count);
+    const char* bad[] = {"[3,3]", "[0,1]", "[-1,2]", "[1]", "\"x\""};
+    for (const char* ap : bad) {
+        char buf[96];
+        snprintf(buf, sizeof(buf), "{\"an\":\"a-much-too-long-name\",\"ap\":%s,\"ok\":true}", ap);
+        TEST_ASSERT_TRUE(payload_parse(buf, &d, nullptr));
+        TEST_ASSERT_EQUAL_INT_MESSAGE(-1, d.account_count, ap);
+        TEST_ASSERT_EQUAL_STRING("a-much-too-l", d.account);   // cut to 12
+    }
+}
+
 static void test_codex_fields(void) {
     UsageData d;
     TEST_ASSERT_TRUE(payload_parse("{\"s\":10,\"ok\":true}", &d, nullptr));
@@ -316,6 +337,7 @@ static void test_codex_fields(void) {
 int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_codex_fields);
+    RUN_TEST(test_account_name);
     RUN_TEST(test_rejects_malformed_json);
     RUN_TEST(test_empty_object_gives_legacy_defaults);
     RUN_TEST(test_legacy_fields);

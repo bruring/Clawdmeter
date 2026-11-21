@@ -1,6 +1,8 @@
 #include "signals.h"
 #include "usage_rate.h"
 
+#include <string.h>
+
 // Pure: no Arduino. See signals.h.
 
 static bool     hooks_seen = false;
@@ -9,6 +11,7 @@ static uint32_t last_seq   = 0;
 static char     last_event = '\0';
 static int      sessions   = -1;
 static int      meter_kind = -1;   // usage_meter_kind of the last real sample
+static char     last_account[sizeof(((UsageData*)0)->account)] = "";   // `an` of the last real sample
 
 void signals_clear(void) {
     hooks_seen = false;
@@ -17,6 +20,7 @@ void signals_clear(void) {
     last_event = '\0';
     sessions = -1;
     meter_kind = -1;
+    last_account[0] = '\0';
     usage_rate_clear();
 }
 
@@ -51,6 +55,16 @@ SignalsUpdate signals_ingest_at(const UsageData* d, uint32_t now_ms) {
             u.meter_kind_changed = true;
         }
         meter_kind = kind;
+        // Another of the app's accounts (`an`): its numbers aren't this
+        // one's either, so a drop isn't a reset and a rise isn't usage.
+        if (d->account[0]) {
+            if (last_account[0] && strcmp(last_account, d->account) != 0) {
+                usage_rate_restart();
+                u.meter_kind_changed = true;
+            }
+            strncpy(last_account, d->account, sizeof(last_account) - 1);
+            last_account[sizeof(last_account) - 1] = '\0';
+        }
     }
     u.session_reset = usage_rate_sample_at(now_ms, d->session_pct, !real_sample);
 
