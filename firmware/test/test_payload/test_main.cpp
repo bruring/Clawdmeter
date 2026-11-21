@@ -280,7 +280,8 @@ static void test_account_name(void) {
     TEST_ASSERT_TRUE(payload_parse("{\"s\":1,\"ok\":true}", &d, nullptr));
     TEST_ASSERT_EQUAL_STRING("", d.account);
     TEST_ASSERT_EQUAL_INT(-1, d.account_count);
-    TEST_ASSERT_TRUE(payload_parse("{\"s\":1,\"an\":\"globex-inc\",\"ap\":[2,3],\"ok\":true}", &d, nullptr));
+    TEST_ASSERT_TRUE(payload_parse("{\"s\":1,\"an\":\"globex-inc\",\"ap\":[2,3],\"rf\":\"wf\",\"ok\":true}", &d, nullptr));
+    TEST_ASSERT_EQUAL_STRING("wf", d.resets_kind);
     TEST_ASSERT_EQUAL_STRING("globex-inc", d.account);
     TEST_ASSERT_EQUAL_INT(2, d.account_idx);
     TEST_ASSERT_EQUAL_INT(3, d.account_count);

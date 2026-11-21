@@ -90,6 +90,9 @@ pub struct AccountRow {
     pub spend_pct: Option<u32>,
     /// Reset credits held, when known.
     pub resets_held: Option<u32>,
+    /// What each held one resets (`ResetKind::code` letters), when known.
+    #[serde(default)]
+    pub resets_kinds: String,
     /// The numbers are old (polls keep missing).
     pub stale: bool,
     /// No numbers, and the last check failed in a way the user has to fix
@@ -138,7 +141,7 @@ impl AccountRow {
             (None, None, None) => return "No data yet".into(),
         };
         if let Some(n) = self.resets_held {
-            s.push_str(&format!(" · {n} reset{}", if n == 1 { "" } else { "s" }));
+            s.push_str(&format!(" · {}", resets_words(n, &self.resets_kinds)));
         }
         if self.stale {
             s.push_str(" · out of date");
@@ -152,6 +155,22 @@ impl AccountRow {
             (Some(s), Some(w)) => Some(s.max(w)),
             (s, w) => s.or(w),
         })
+    }
+}
+
+/// Reset credits held, in words, naming the Fable-only ones when every
+/// one's kind is known: "2 resets (1 Fable)", "1 Fable reset", "3 resets".
+/// Short enough for the macOS panel's rows.
+pub fn resets_words(held: u32, kinds: &str) -> String {
+    let s = |n: usize| if n == 1 { "" } else { "s" };
+    let fable = kinds.chars().filter(|c| *c == 'f').count();
+    if held == 0 || fable == 0 || kinds.chars().count() != held as usize {
+        return format!("{held} reset{}", s(held as usize));
+    }
+    if fable == held as usize {
+        format!("{held} Fable reset{}", s(held as usize))
+    } else {
+        format!("{held} resets ({fable} Fable)")
     }
 }
 
@@ -173,10 +192,13 @@ pub fn account_rows(e: &clawdmeter_core::EngineStatus, labels: &[(PathBuf, Strin
             let r = a.reading.as_ref();
             let spend = r.filter(|r| r.meter_kind() == MeterKind::Spend);
             // Reset credits where the main screens show them: a weekly-only plan.
-            let resets = r
+            let credits = r
                 .filter(|r| r.no_session_limit())
                 .and_then(|r| r.resets.as_ref())
-                .map(|c| chrono::DateTime::from_timestamp(now, 0).map_or(c.held, |at| c.at(at).held));
+                .map(|c| chrono::DateTime::from_timestamp(now, 0).map_or_else(|| c.clone(), |at| c.at(at)));
+            let resets = credits.as_ref().map(|c| c.held);
+            let resets_kinds: String =
+                credits.as_ref().map(|c| c.kinds.iter().map(|k| k.code()).collect()).unwrap_or_default();
             AccountRow {
                 dir: a.dir.display().to_string(),
                 label: labels.iter().find(|(d, _)| *d == a.dir).map(|(_, l)| l.clone()).unwrap_or_default(),
@@ -193,6 +215,7 @@ pub fn account_rows(e: &clawdmeter_core::EngineStatus, labels: &[(PathBuf, Strin
                     .map(|t| t.timestamp()),
                 spend_pct: spend.map(|r| r.session_pct()),
                 resets_held: resets,
+                resets_kinds,
                 stale: a.stale,
                 signed_out: r.is_none() && e.errors.iter().any(|x| x.dir == a.dir && !x.retrying),
                 most_room: false,
@@ -303,6 +326,10 @@ pub struct StatusSnapshot {
     /// `ResetCredits::MAX_EXPIRIES`); empty when unknown.
     #[serde(default)]
     pub resets_expiries: Vec<i64>,
+    /// What each of `resets_expiries` resets, one `ResetKind::code` letter
+    /// each (`w` weekly, `f` Fable only); empty when all alike (Codex).
+    #[serde(default)]
+    pub resets_kinds: String,
     /// Every account, with two or more ([`account_rows`]).
     #[serde(default)]
     pub accounts: Vec<AccountRow>,
@@ -374,6 +401,7 @@ impl StatusSnapshot {
                 .map(|t| t.timestamp()),
             codex: reading.is_some_and(|r| r.provider == clawdmeter_core::usage::Provider::Codex),
             resets_held: resets.as_ref().map(|c| c.held),
+            resets_kinds: resets.as_ref().map(|c| c.kinds.iter().map(|k| k.code()).collect()).unwrap_or_default(),
             resets_expiries: resets.map(|c| c.expiries.iter().map(|t| t.timestamp()).collect()).unwrap_or_default(),
             accounts: account_rows(e, &s.labels, now),
         }
@@ -681,7 +709,7 @@ mod tests {
         let ultra = UsageReading {
             week: week(95),
             session_limit: SessionLimit::Absent,
-            resets: Some(ResetCredits { held: 0, expiries: vec![] }),
+            resets: Some(ResetCredits { held: 0, ..Default::default() }),
             ..Default::default()
         };
         let max = UsageReading {
@@ -762,7 +790,7 @@ mod tests {
             week: Some(Window { pct: 20, resets_at: None }),
             session_limit: SessionLimit::Absent,
             provider: Provider::Codex,
-            resets: Some(ResetCredits { held: 3, expiries: vec![day(1), day(5), day(12)] }),
+            resets: Some(ResetCredits { held: 3, expiries: vec![day(1), day(5), day(12)], kinds: vec![] }),
             ..Default::default()
         });
         let snap = StatusSnapshot::from_status(&s, day(1).timestamp() - 60);

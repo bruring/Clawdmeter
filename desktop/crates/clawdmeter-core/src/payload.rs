@@ -54,6 +54,11 @@ pub struct Payload {
     /// soonest first, at most 10. Absent when unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rx: Option<Vec<String>>,
+    /// What each `rx` date resets, one letter each in step with it: `w` the
+    /// weekly limit, `f` only Fable's, `o` other (Claude's grants). Absent
+    /// when they're all alike (Codex's credits).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rf: Option<String>,
     /// Enterprise: % of the billing period elapsed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tp: Option<u32>,
@@ -146,8 +151,8 @@ pub struct Payload {
 
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
-    "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m", "x",
-    "a", "e", "es", "n", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc", "an", "ap",
+    "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "rf", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m",
+    "x", "a", "e", "es", "n", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc", "an", "ap",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -328,6 +333,9 @@ impl Payload {
                     format!("{} {}", l.format("%b"), l.day())
                 };
                 p.rx = Some(c.expiries.iter().take(ResetCredits::MAX_EXPIRIES).map(day).collect());
+                if c.kinds.len() == c.expiries.len() {
+                    p.rf = Some(c.kinds.iter().take(ResetCredits::MAX_EXPIRIES).map(|k| k.code()).collect());
+                }
             }
         }
         p
@@ -605,6 +613,7 @@ mod tests {
             resets: Some(ResetCredits {
                 held: 3,
                 expiries: vec![at("2026-11-27T09:00:00Z"), at("2026-12-10T18:30:00Z"), at("2026-12-31T23:30:00Z")],
+                kinds: vec![],
             }),
             ..Default::default()
         };
@@ -666,6 +675,7 @@ mod tests {
             pv: Some("codex".into()),
             rc: Some(999),
             rx: Some(vec!["Sep 30".into(); ResetCredits::MAX_EXPIRIES]),
+            rf: Some("w".repeat(ResetCredits::MAX_EXPIRIES)),
             tp: Some(100),
             pd: Some(31),
             rd: Some("Sep 30".into()),
@@ -695,9 +705,9 @@ mod tests {
         // A Codex account never carries Fable (`wf`, `fc`); a Claude one never
         // `pv`; a spend cap (`ent`) has its period and no reset credits.
         let shapes = [
-            ("codex week", Payload { wf: None, fc: None, tp: None, pd: None, rd: None, ..all.clone() }),
+            ("codex week", Payload { wf: None, fc: None, rf: None, tp: None, pd: None, rd: None, ..all.clone() }),
             ("claude week with grants", Payload { pv: None, tp: None, pd: None, rd: None, ..all.clone() }),
-            ("spend cap", Payload { pv: None, rc: None, rx: None, acct: Some("ent".into()), ..all.clone() }),
+            ("spend cap", Payload { pv: None, rc: None, rx: None, rf: None, acct: Some("ent".into()), ..all.clone() }),
         ];
         for (what, pl) in shapes {
             let json = pl.to_json();
@@ -719,6 +729,7 @@ mod tests {
             pv: Some("codex".into()),
             rc: Some(3),
             rx: Some(vec!["Dec 1".into()]),
+            rf: Some("f".into()),
             tp: Some(1),
             pd: Some(30),
             rd: Some("Oct 1".into()),

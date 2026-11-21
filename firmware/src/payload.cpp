@@ -74,6 +74,7 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
             copy_str(d.resets_expiry[d.resets_expiry_n++], sizeof(d.resets_expiry[0]), v.as<const char*>());
         }
     }
+    copy_str(d.resets_kind, sizeof(d.resets_kind), doc["rf"] | "");
     copy_str(d.account, sizeof(d.account), doc["an"] | "");
     d.account_idx = d.account_count = -1;
     JsonVariant ap = doc["ap"];

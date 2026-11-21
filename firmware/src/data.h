@@ -29,6 +29,8 @@ struct UsageData {
     int8_t  resets_expiry_n; // `rx` how many expiry dates came (0-10); -1 = absent
     char    resets_expiry[10][8]; // `rx` each held credit's expiry, host-local
                              //   ("Dec 1"), soonest first
+    char    resets_kind[11]; // `rf` what each `rx` date resets, one letter each: 'w' the
+                             //   weekly limit, 'f' only Fable's, 'o' other; "" = all alike
     char    account[13];     // `an` which of the app's accounts these numbers are
                              //   ("acme"); "" = absent (one account, or an older app)
     int8_t  account_idx;     // `ap` [index, count]: its place among them, for the
