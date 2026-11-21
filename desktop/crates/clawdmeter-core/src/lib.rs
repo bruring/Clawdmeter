@@ -8,6 +8,8 @@
 //! * [`codex`]: OpenAI Codex usage (a trial), an account like a Claude config dir.
 //! * [`probe`]: usage from one message's rate-limit headers, and when that is allowed.
 //! * [`events`]: the hook events log (fast clock) and the activity tracker.
+//! * [`identity`], [`remote`]: who an account is signed in as, and the hub's
+//!   wire format (hook records from other computers).
 //! * [`attention`]: the attention hook's alert / clear files (written by
 //!   `clawdmeter hook`; the installer lives in the app crate).
 //! * [`cadence`]: when to poll, when to heartbeat.
@@ -31,6 +33,7 @@ pub mod codex;
 pub mod config;
 pub mod engine;
 pub mod events;
+pub mod identity;
 pub mod launch;
 pub mod oauth;
 pub mod paths;
@@ -38,6 +41,7 @@ pub mod payload;
 pub mod platform;
 pub mod probe;
 pub mod rate;
+pub mod remote;
 pub mod selector;
 pub mod themes;
 pub mod usage;

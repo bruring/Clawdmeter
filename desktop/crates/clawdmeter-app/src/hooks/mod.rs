@@ -9,8 +9,13 @@
 //!   id}`, one line; the kind lets the daemon drop alert types the user
 //!   turned off, see [`clawdmeter_core::attention::AlertKind`]);
 //! * `clear` touches `clear-<session id>`;
-//! * `event` appends `<unix_ts> <hook_event_name> <session_id>` to
-//!   `events.log`, rolling it to `events.log.1` past 256 KB.
+//! * `event` appends `<unix_ts> <hook_event_name> <session_id> [<config dir>]`
+//!   to `events.log`, rolling it to `events.log.1` past 256 KB. The config
+//!   dir is the account's, from the input's `transcript_path`.
+//!
+//! With a hub to send to (`hub_url` and `hub_token`, see [`crate::hub`]), the
+//! hook sends the same information to the hub instead ([`record`]), and writes
+//! the files here too only with `hub_local = on`.
 //!
 //! `alert event` / `clear event` do both from one read of stdin. Only the
 //! event name and session id are recorded, never the prompt or the tool call.
@@ -22,10 +27,12 @@ pub mod install;
 
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use clawdmeter_core::attention::AlertKind;
+use clawdmeter_core::identity::Identity;
+use clawdmeter_core::remote::{HookRecord, RemoteAlert, WIRE_VERSION};
 use serde_json::{Map, Value};
 
 /// `events.log` rolls over once it is larger than this.
@@ -140,6 +147,13 @@ pub fn event_line(v: &Value, now_unix: u64) -> Option<String> {
 
 fn log_event(v: &Value, dir: &Path, now_unix: u64) -> io::Result<()> {
     let Some(line) = event_line(v, now_unix) else { return Ok(()) };
+    append_event_line(dir, &line)
+}
+
+/// Append one line (newline included) to `events.log` under `dir`, rolling
+/// the log to `events.log.1` past [`EVENTS_ROLL_BYTES`]. The hub writes
+/// remote records through this too.
+pub fn append_event_line(dir: &Path, line: &str) -> io::Result<()> {
     let f = dir.join("events.log");
     if fs::metadata(&f).is_ok_and(|m| m.is_file() && m.len() > EVENTS_ROLL_BYTES) {
         let _ = fs::rename(&f, dir.join("events.log.1"));
@@ -192,6 +206,12 @@ fn question(tool_input: Option<&Value>) -> Option<Option<Value>> {
 
 fn write_alert(v: &Value, dir: &Path) -> io::Result<()> {
     let Some(body) = alert_json(v) else { return Ok(()) };
+    write_attention(dir, &body)
+}
+
+/// Replace the `attention` file under `dir` with `body` (one JSON line), in
+/// one rename so the daemon never reads half of it.
+pub fn write_attention(dir: &Path, body: &str) -> io::Result<()> {
     let tmp = dir.join(format!("attention.{}", std::process::id()));
     fs::write(&tmp, body)?;
     fs::rename(&tmp, dir.join("attention")).inspect_err(|_| {
@@ -214,9 +234,46 @@ pub fn clear_name(v: &Value) -> Option<String> {
 
 fn touch_clear(v: &Value, dir: &Path) -> io::Result<()> {
     let Some(name) = clear_name(v) else { return Ok(()) };
+    touch_clear_file(dir, &name)
+}
+
+/// Create or touch `dir/<name>` (a `clear-<sid>` name from [`clear_name`] or
+/// [`clawdmeter_core::remote::local_writes`]).
+pub fn touch_clear_file(dir: &Path, name: &str) -> io::Result<()> {
     let f: File = OpenOptions::new().create(true).truncate(false).write(true).open(dir.join(name))?;
     // `touch` on an existing file: the daemon compares this mtime with the alert's.
     f.set_modified(SystemTime::now())
+}
+
+/// What one hook run sends to the hub: the event to log, the alert and the
+/// clear that [`run`] would write here, with the raw session id. `None` when
+/// the run writes nothing (bad input, or a mode with nothing to do).
+pub fn record(mode: Mode, v: &Value, host: &str, now_unix: u64, acct: Option<Identity>) -> Option<HookRecord> {
+    let obj = as_jq_object(v)?;
+    let event = (mode.log_too || mode.action == Action::Event)
+        .then(|| present(obj.get("hook_event_name")).map_or_else(|| "unknown".to_owned(), jq_tostring));
+    let alert = if mode.action == Action::Alert {
+        alert_json(v).and_then(|t| serde_json::from_str::<Value>(&t).ok()).map(|a| RemoteAlert {
+            k: a["k"].as_str().unwrap_or("permission").to_owned(),
+            m: a["m"].as_str().map_or_else(|| a["m"].to_string(), str::to_owned),
+        })
+    } else {
+        None
+    };
+    let clear = mode.action == Action::Clear && clear_name(v).is_some();
+    if event.is_none() && alert.is_none() && !clear {
+        return None;
+    }
+    Some(HookRecord {
+        v: WIRE_VERSION,
+        host: host.to_owned(),
+        ts: now_unix,
+        event,
+        sid: present(obj.get("session_id")).map(jq_tostring).unwrap_or_default(),
+        acct,
+        alert,
+        clear,
+    })
 }
 
 /// Entry point for `clawdmeter hook …`: read stdin, run, never fail.
@@ -231,11 +288,77 @@ pub fn main(args: &[String]) -> i32 {
         let _ = stdin.lock().read_to_string(&mut input);
     }
     if mode.action != Action::None || mode.log_too {
-        let state = clawdmeter_core::Paths::for_user().state_dir;
+        let paths = clawdmeter_core::Paths::for_user();
         let now = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        run(mode, &input, &state, now);
+        let hub = crate::hub::config(&paths);
+        if hub.sender().is_some() {
+            crate::hub::send_hook(mode, &input, &hub, &paths, now);
+        }
+        if hub.sender().is_none() || hub.local {
+            run(mode, &input, &paths.state_dir, now);
+        }
     }
     0
+}
+
+/// `clawdmeter hooks install|status|remove [--dir DIR]…`: the Hooks page's
+/// installer without the window, for computers that only send to a hub.
+/// Without `--dir`, every Claude account in the config (`~/.claude` by
+/// default).
+pub fn cli(paths: &clawdmeter_core::Paths, args: &[String]) -> i32 {
+    let mut dirs = Vec::new();
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        match (a.as_str(), it.next()) {
+            ("--dir", Some(d)) => dirs.push(paths.expand_tilde(d)),
+            _ => {
+                eprintln!("usage: clawdmeter hooks install|status|remove [--dir DIR]...");
+                return 2;
+            }
+        }
+    }
+    if dirs.is_empty() {
+        dirs =
+            clawdmeter_core::Settings::load(paths).map_or_else(|_| vec![paths.home.join(".claude")], |s| s.config_dirs);
+    }
+    let cmd = args.first().map(String::as_str);
+    if !matches!(cmd, Some("install" | "status" | "remove")) {
+        eprintln!("usage: clawdmeter hooks install|status|remove [--dir DIR]...");
+        return 2;
+    }
+    // Only install and status need the binary hooks run (finding it can copy
+    // an AppImage's binary out).
+    let exe = if cmd == Some("remove") {
+        PathBuf::new()
+    } else {
+        match install::hook_binary(&paths.state_dir) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("can't find the binary for hooks to run: {e}");
+                return 1;
+            }
+        }
+    };
+    let mut code = 0;
+    for d in &dirs {
+        let done = match cmd {
+            Some("install") => install::plan_install(d, &exe).and_then(|p| p.apply()).map(|()| "installed".to_owned()),
+            Some("remove") => install::plan_uninstall(d).and_then(|p| p.apply()).map(|()| "removed".to_owned()),
+            Some("status") => Ok(format!("{:?}", install::dir_status(d, &exe))),
+            _ => {
+                eprintln!("usage: clawdmeter hooks install|status|remove [--dir DIR]...");
+                return 2;
+            }
+        };
+        match done {
+            Ok(what) => println!("{}: {what}", d.display()),
+            Err(e) => {
+                eprintln!("{}: {e}", d.display());
+                code = 1;
+            }
+        }
+    }
+    code
 }
 
 #[cfg(test)]

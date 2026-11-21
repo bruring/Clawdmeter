@@ -516,6 +516,7 @@ mod tests {
             },
             last_write_at: last_write,
             claude: None,
+            hub: Default::default(),
         }
     }
 

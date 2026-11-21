@@ -16,6 +16,7 @@ pub mod daemon;
 pub mod diff;
 pub mod errors;
 pub mod hooks;
+pub mod hub;
 pub mod ipc;
 pub mod logger;
 pub mod onboarding;

@@ -124,6 +124,41 @@ written to the event log.
 Usage meters work without hooks. Use **Send a test alert** to check the
 app-to-device alert path; it does not test whether Claude Code invoked a hook.
 
+### Hooks from other computers (hub)
+
+Sessions on other computers can reach the board too. The computer with the
+board is the hub; the others send their hook events to it.
+
+On the hub, add to the config file:
+
+```
+hub_listen = 0.0.0.0:47811
+hub_token = <a random secret, at least 16 characters>
+```
+
+On each other computer, install Clawdmeter (nothing needs to run there),
+then add:
+
+```
+hub_url = <hub address>:47811
+hub_token = <the same secret>
+```
+
+Then run `clawdmeter hooks install` and `clawdmeter hub test`; the board
+should show a test alert. `clawdmeter hub ping` checks the connection alone.
+
+How it works:
+
+- The hub matches each session to its own account by sign-in (the account
+  id), not by folder name, so the same account must be added on the hub's
+  Accounts page.
+- A session from another computer shows as `<computer>.<session>` in the
+  hub's `events.log`. Set `hub_host` to choose the name.
+- When the hub can't be reached, events are dropped for 30 seconds; hooks
+  never wait on it for long.
+- The token travels in plain HTTP. Use the hub on a network you trust, or
+  through an SSH tunnel.
+
 ## Start at login
 
 Enable **Settings → Start at login** to launch the tray app when you sign in.
@@ -421,15 +456,16 @@ Everything Clawdmeter sends over the network:
 
 | Call | Goes to | When | Tokens |
 | --- | --- | --- | --- |
-| Probe: `claude -p --model haiku`, "Reply with just: ok", no tools | Anthropic, through Claude Code | While that account's 5-hour session is known to be running: the shown account after a prompt and every 3 to 15 minutes, depending on activity; other accounts every 10 minutes | A few, against the running session |
-| Usage endpoint, `GET api.anthropic.com/api/oauth/usage`, with the sign-in Claude Code stored and User-Agent `clawdmeter/<version>` | Anthropic | When no session is running, and as a fallback: every 12 minutes per account | None |
+| Probe: `claude -p --model haiku`, "Reply with just: ok", no tools | Anthropic, through Claude Code | While that account's 5-hour session is known to be running: the shown account after a prompt, about 10 seconds after a turn stops, on **Refresh now** or a board's request, and every 3 to 15 minutes depending on activity; other accounts every 10 minutes | A few, against the running session |
+| Usage endpoint, `GET api.anthropic.com/api/oauth/usage`, with the sign-in Claude Code stored and User-Agent `clawdmeter/<version>` | Anthropic | Every 12 minutes per account while no session is known to be running. When a probe misses, or Claude Code isn't installed, it takes the probe's place at the probe's times | None |
 | `claude -p /usage` | Anthropic, through Claude Code | When the stored sign-in has expired or is refused, or can't be read | None (a Claude Code command, not a message) |
 | `GET chatgpt.com/backend-api/wham/usage` and `…/rate-limit-reset-credits` | OpenAI | Codex accounts only: every 5 or 10 minutes, and the credits at most hourly | None |
-| GitHub releases (`api.github.com`, `github.com`) | GitHub | Every 6 hours while **Check for updates** is on; downloads only when you flash a board or update the app | None |
+| Hook records (event name, session id, this computer's name, the account and organization ids, alert text), only when `hub_url` is set | Your own hub computer, over plain HTTP with `hub_token` | Each hook event | None |
+| GitHub releases (`api.github.com`, `github.com`) | GitHub | Every 6 hours while **Check for updates** is on (an hour after a check that failed). Opening the Flash or Update page also asks GitHub, whatever that setting says. Downloads only when you flash a board or update the app | None |
 
 Nothing else is sent: no telemetry and no account with us. Sign-ins are only
 read, never copied or refreshed. Hook events and alerts stay on this computer
-and go to the board over Bluetooth.
+and go to the board over Bluetooth, unless you send them to a hub (below).
 
 ### Command line
 

@@ -79,6 +79,8 @@ pub struct Status {
     pub last_write_at: Option<i64>,
     /// `claude` CLI path in use (None = not found).
     pub claude: Option<PathBuf>,
+    /// The hub's listener (`hub_listen`), for other computers' hooks.
+    pub hub: crate::hub::HubState,
 }
 
 /// Handle held by the UI.
@@ -197,6 +199,8 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         ),
     }
     engine.set_claude_found(claude.is_some());
+    let mut hub = crate::hub::Hub::default();
+    hub.sync(&crate::hub::config(&paths), &engine.settings().config_dirs, &paths, unix_now());
 
     let mut link: Option<DeviceLink> = None;
     let mut device_events: Option<DeviceEvents> = None;
@@ -241,6 +245,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     // This tick's write check sees the new settings.
                     last_settings = now;
                     reload_settings(&paths, &mut engine, &mut claude);
+                    hub.sync(&crate::hub::config(&paths), &engine.settings().config_dirs, &paths, now);
                 }
                 Ok(Command::Shutdown) | Err(mpsc::error::TryRecvError::Disconnected) => {
                     if let Some(l) = link.take() {
@@ -258,6 +263,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         if now - last_settings >= SETTINGS_EVERY {
             last_settings = now;
             reload_settings(&paths, &mut engine, &mut claude);
+            hub.sync(&crate::hub::config(&paths), &engine.settings().config_dirs, &paths, now);
         }
 
         // ---- fast clock ----
@@ -456,6 +462,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             engine: engine.status(now),
             last_write_at,
             claude: claude.clone(),
+            hub: hub.state.clone(),
         });
     }
 }

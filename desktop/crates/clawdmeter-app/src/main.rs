@@ -31,7 +31,13 @@ OPTIONS:
     --ports           List attached Espressif USB ports
     --info PORT       Ask the firmware on PORT for its env/version
     hook MODE [event] Claude Code hook (MODE: alert, clear or event); reads the
-                      hook JSON on stdin, prints nothing, always exits 0
+                      hook JSON on stdin, prints nothing, always exits 0. With
+                      hub_url and hub_token set it sends to the hub instead
+    hooks install|status|remove [--dir DIR]...
+                      Set up the hooks without the window (default: every
+                      account in the config)
+    hub ping|test     Check the way to the hub (hub_url): ping it, or send it
+                      a test alert
     -V, --version
     -h, --help
 
@@ -39,6 +45,8 @@ ENVIRONMENT:
     CLAWDMETER_LOG       error|warn|info|debug (default info)
     CLAWDMETER_NO_TRAY   1 = show the app window instead of a tray icon
     POLL_INTERVAL        default poll interval (the config file overrides it)
+    CLAWDMETER_HUB, CLAWDMETER_HUB_TOKEN, CLAWDMETER_HOST
+                         hub_url, hub_token and hub_host, over the config file
 ";
 
 #[cfg(windows)]
@@ -85,6 +93,8 @@ fn main() {
             }
         }
         "--once" => daemon::once(&paths),
+        "hooks" => clawdmeter_app::hooks::cli(&paths, &args[1..]),
+        "hub" => clawdmeter_app::hub::cli(&paths, &args[1..]),
         "--ports" => {
             for p in clawdmeter_flash::device::list_ports() {
                 println!("{}  {:04x}:{:04x}  {}", p.path, p.vid, p.pid, p.serial_number.unwrap_or_default());

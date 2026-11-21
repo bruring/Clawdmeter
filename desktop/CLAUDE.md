@@ -32,7 +32,8 @@ is faked behind `FlashHardware`.
   their config spelling and `k1`–`k3` codes), `rate`, `engine` (I/O-free state
   machine: `next_write` / `mark_written`), `autostart` (systemd / XDG /
   LaunchAgent / Run key, legacy-daemon detection + `disable_legacy`),
-  `launch`, `platform`.
+  `launch`, `platform`, `identity` (who a config dir is signed in as) and
+  `remote` (the hub's wire format, pure).
 - `clawdmeter-ble`: btleplug link. The manager and adapter come from one
   `Bluetooth` handle per runtime (`bluetooth.rs`), kept for good: on Linux
   every btleplug `Manager` is a D-Bus connection that is never closed, on
@@ -90,7 +91,7 @@ is faked behind `FlashHardware`.
   window (`ui/`), `daemon.rs` (drives the engine on its own thread: 0.5 s
   tick, config re-read every 5 s and on `Command::ReloadSettings`),
   `hooks/` (`clawdmeter hook alert|clear|event` and the settings.json
-  installer), `ipc.rs` (single-instance lock, status file, command queues,
+  installer), `hub.rs` (the hub: hook records from other computers), `ipc.rs` (single-instance lock, status file, command queues,
   window lock), `onboarding.rs`, `boards.rs` (names, buy links,
   illustrations), `chime.rs`.
 
@@ -98,13 +99,17 @@ is faked behind `FlashHardware`.
 
 - Modes: no args = tray app (logs to `<state>/daemon.log`); `--daemon`
   headless; `--once` (poll + print payload, no BLE); `--window [PAGE]
-  [--manifest PATH]`; `--ports`; `--info PORT`; `hook MODE [event]`.
+  [--manifest PATH]`; `--ports`; `--info PORT`; `hook MODE [event]`;
+  `hooks install|status|remove [--dir DIR]…` (the installer without the
+  window); `hub ping|test`.
 - Env: `CLAWDMETER_LOG`, `CLAWDMETER_NO_TRAY`, `POLL_INTERVAL`,
   `CLAUDE_CONFIG_DIR` (default account), `CODEX_HOME` (the default Codex
   account), `CLAWDMETER_BLE_ADDRESS`,
   `CLAWDMETER_DECORATIONS`, `CLAWDMETER_BUTTON_LAYOUT`,
   `CLAWDMETER_DEMO_FIRMWARE_UPDATE` (debug builds: pretend that firmware
   release is out and the board older, for the tray's update icon),
+  `CLAWDMETER_HUB`, `CLAWDMETER_HUB_TOKEN`, `CLAWDMETER_HOST` (`hub_url`,
+  `hub_token`, `hub_host`, over the file),
   `CLAWDMETER_DEMO_USAGE=1` (debug builds: the tray shows made-up usage,
   the same on every OS; with the pace marker on, `--example tray_header`'s
   `compare` render matches it, for side-by-side screenshots).
@@ -193,6 +198,55 @@ is faked behind `FlashHardware`.
   keeps `$APPIMAGE`. Installs refuse paths that won't survive (macOS disk
   image or AppTranslocation, Windows temp/zip folders), and existing entries
   pointing there show as stale.
+
+## Hub: hooks from other computers
+
+The computer with the device can take hook events from other computers
+(`hub.rs`, wire format in `clawdmeter-core::remote`).
+
+- **Hub side:** `hub_listen = 0.0.0.0:47811` and `hub_token` (at least 16
+  characters).
+  - The daemon runs a `std::net` accept thread (there is no server crate, and
+    tokio has no `net`). Each connection gets a thread of its own (at most 16)
+    with a 1 s deadline for the whole request, so a slow client holds up
+    nobody, and dropping the listener joins only the accept loop. Records are
+    written one at a time, under one lock. The daemon rebinds when the address
+    changes and retries a busy port every 30 s; `Status.hub` shows its state.
+  - It answers `GET /v1/ping` with no token. `POST /v1/hook` needs
+    `Authorization: Bearer <hub_token>`, compared in constant time; the source
+    address is not trusted.
+  - Bodies are at most 8 KB. Answers: 204, 400, 401, 404, 413, or 429 above
+    50 records/s.
+- **Each record** is written into the hub's own `events.log`, `attention` and
+  `clear-*` files (`remote::local_writes`, through `hooks::append_event_line`,
+  `write_attention` and `touch_clear_file`), so the engine sees a local hook.
+  - The hub stamps the record with its own clock.
+  - The session id becomes `<host>.<sid>`; the test alert's id stays as it is.
+  - The account is the local dir whose sign-in matches the record's `acct`
+    (`identity::IdentityMap`: `accountUuid` and `organizationUuid` from
+    `.credentials.json`, else `.claude.json`'s `oauthAccount`). The organization
+    must match too, because one login can hold a personal plan and a team plan.
+    It is never matched by path, since another computer's `~/.claude` can be a
+    different account; no match leaves the line unattributed (a wrong match
+    could let the probe start a window).
+  - The map is rebuilt when `config_dirs` changes, and every minute so a
+    re-login is picked up.
+- **Sending side:** `hub_url` (`host[:port]`) and `hub_token`; `hub_host` sets
+  the label, otherwise the host name. `clawdmeter hook` then sends one record per
+  run instead of writing local files; `hub_local = on` writes them too.
+  - The record's account dir is `$CLAUDE_CONFIG_DIR`, else the transcript's,
+    else `~/.claude`. Its identity comes from that dir, falling back to
+    `hub_accounts = <dir>=<email or uuid>, …`. Only the ids go on the wire,
+    and the email only when there is no id (`Identity::for_wire`); the
+    sender's path never does.
+  - Timeouts: 250 ms for the name lookup (on a thread, since `getaddrinfo` can
+    hang), 250 ms to connect to each resolved address in turn, and 400 ms for
+    the answer. On macOS the label falls back to `scutil --get LocalHostName`.
+  - Any failure, a 401 included, writes `<state>/hub-down` and keeps the hook
+    quiet for 30 s. There is no spool. It still prints nothing and exits 0.
+  - Only `ConfigFile` is read, never `Settings::load`.
+- `clawdmeter hub ping|test` checks the way to the hub. `clawdmeter hooks
+  install|status|remove` sets up hooks on a computer without the window.
 
 ## Usage sources
 
