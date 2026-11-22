@@ -295,14 +295,20 @@ impl Engine {
         self.labels = labels;
     }
 
-    /// `an` and `ap` for `dir`: its device label, and its place among the
-    /// accounts with the count. `None` with fewer than two accounts.
-    fn account_key(&self, dir: &Path) -> Option<(String, [u32; 2])> {
+    /// `an` and `ap` for `dir`: its device label, with two or more
+    /// accounts listed, and its place among the accounts with numbers (the
+    /// ones a peek goes round; a listed folder that never read, or whose
+    /// sign-in died, isn't counted), with two or more of those. The name
+    /// goes out whenever two are listed: the device restarts its rate math
+    /// only on a name it's given, so one account reading alone still needs it.
+    fn account_key(&self, dir: &Path) -> Option<(String, Option<[u32; 2]>)> {
         let list: Vec<&PathBuf> = self.settings.accounts().map(|(d, _)| d).collect();
         if list.len() < 2 {
             return None;
         }
         let i = list.iter().position(|d| d.as_path() == dir)?;
+        let live: Vec<&PathBuf> = list.iter().copied().filter(|d| self.has_numbers(d)).collect();
+        let place = live.iter().position(|d| d.as_path() == dir).filter(|_| live.len() >= 2);
         // Names must tell the accounts apart (the device restarts its rate
         // math on a new name): a shared one falls back to the folder, then
         // gets the account's place appended.
@@ -318,7 +324,12 @@ impl Engine {
             let n = (i + 1).to_string();
             format!("{}{n}", folders[i].chars().take(12 - n.len()).collect::<String>())
         };
-        Some((name, [i as u32, list.len() as u32]))
+        Some((name, place.map(|p| [p as u32, live.len() as u32])))
+    }
+
+    /// Whether `dir` has a reading to show.
+    fn has_numbers(&self, dir: &Path) -> bool {
+        self.accounts.get(dir).is_some_and(|a| a.last.is_some())
     }
 
     /// The device asked for the next (`step` 1) or previous (-1) account
@@ -329,12 +340,8 @@ impl Engine {
     /// numbers go out as replays, so they never reach the rate math.
     /// Returns the account peeked at.
     pub fn peek(&mut self, step: i32, now: i64) -> Option<PathBuf> {
-        let list: Vec<PathBuf> = self
-            .settings
-            .accounts()
-            .map(|(d, _)| d.clone())
-            .filter(|d| self.accounts.get(d).is_some_and(|a| a.last.is_some()))
-            .collect();
+        let list: Vec<PathBuf> =
+            self.settings.accounts().map(|(d, _)| d.clone()).filter(|d| self.has_numbers(d)).collect();
         if list.is_empty() {
             self.end_peek();
             return None;
@@ -1037,7 +1044,7 @@ impl Engine {
             let shown = self.peek.as_ref().map(|(d, _)| d.clone()).or_else(|| self.active.clone());
             if let Some((an, ap)) = shown.as_deref().and_then(|d| self.account_key(d)) {
                 p.an = Some(an);
-                p.ap = Some(ap);
+                p.ap = ap;
             }
             (p, kind)
         };
@@ -2142,6 +2149,17 @@ mod tests {
         // Two accounts on one domain name: the device still tells them apart.
         e.set_labels(vec![(a.clone(), "acme-a.com".into()), (b.clone(), "acme-b.com".into())]);
         assert_eq!((e.account_key(&a).unwrap().0, e.account_key(&b).unwrap().0), ("claude".to_owned(), "b".to_owned()));
+
+        // A listed folder with no numbers (never read, or a dead sign-in)
+        // isn't counted: "2/2", not "2/3". One reading alone keeps its name.
+        let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/c, ~/b\n"));
+        e.on_poll_results(T0, vec![(a.clone(), Ok(reading(10))), (b.clone(), Ok(reading(30)))]);
+        let w = write(&mut e, T0).unwrap();
+        assert_eq!((w.payload.an.as_deref(), w.payload.ap), (Some("b"), Some([1, 2])));
+        let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/c, ~/b\n"));
+        e.on_poll_results(T0, vec![(b.clone(), Ok(reading(30)))]);
+        let w = write(&mut e, T0).unwrap();
+        assert_eq!((w.payload.an.as_deref(), w.payload.ap), (Some("b"), None));
     }
 
     // A chosen account that can't be read (not yet, signed out, failing,

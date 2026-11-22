@@ -169,7 +169,7 @@ is faked behind `FlashHardware`.
   `clawdmeter/<version>`.
   Accounts on the device: with two or more, every data write carries `an`
   (`engine::device_label`: the short name's first part, else the folder) and
-  `ap` (`[index, count]` in `Settings::accounts` order). The automatic choice
+  `ap` (`[index, count]` in `Settings::accounts` order, counting only accounts with a reading, the ones a peek goes round). The automatic choice
   follows prompts (`selector::prompt_choice`, from attributed `UserPromptSubmit`
   hook events: newest within 10 min, the shown account held while its own is
   under 5 min), before the rise rule. `Engine::peek` (TX `{"acct":"next"|"prev"}`,
