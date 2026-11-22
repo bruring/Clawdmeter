@@ -158,20 +158,21 @@ impl AccountRow {
     }
 }
 
-/// Reset credits held, in words, naming the Fable-only ones when every
-/// one's kind is known: "2 resets (1 Fable)", "1 Fable reset", "3 resets".
-/// Short enough for the macOS panel's rows.
+/// Reset credits held, in words, naming their kinds when every one's kind
+/// is known: "1 weekly + 1 Fable resets", "2 weekly resets", "1 Fable
+/// reset", else "3 resets". Short enough for the macOS panel's rows.
 pub fn resets_words(held: u32, kinds: &str) -> String {
-    let s = |n: usize| if n == 1 { "" } else { "s" };
-    let fable = kinds.chars().filter(|c| *c == 'f').count();
-    if held == 0 || fable == 0 || kinds.chars().count() != held as usize {
-        return format!("{held} reset{}", s(held as usize));
+    let s = if held == 1 { "" } else { "s" };
+    if held == 0 || kinds.chars().count() != held as usize {
+        return format!("{held} reset{s}");
     }
-    if fable == held as usize {
-        format!("{held} Fable reset{}", s(held as usize))
-    } else {
-        format!("{held} resets ({fable} Fable)")
-    }
+    let count = |k: char| kinds.chars().filter(|c| *c == k).count();
+    let parts: Vec<String> = [('w', "weekly"), ('f', "Fable"), ('o', "other")]
+        .into_iter()
+        .filter(|(k, _)| count(*k) > 0)
+        .map(|(k, w)| format!("{} {w}", count(k)))
+        .collect();
+    format!("{} reset{s}", parts.join(" + "))
 }
 
 fn pct(p: Option<u32>) -> String {
