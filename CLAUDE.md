@@ -102,15 +102,20 @@ The app writes one complete JSON object per write to RX
   math), `rc`/`rx` its reset credits held and each held one's expiry date
   (≤ 10; absent = unknown). They're also sent for a weekly-only Claude
   account's limit-reset grants, read once a day with `claude_resets = on`
-  (`clawdmeter-core::grants`), without `pv`. Fable is Claude's: `wf`/`fc` are never sent
+  (`clawdmeter-core::grants`), without `pv`, with `rf` (what each date
+  resets: `w` weekly, `f` Fable only; the device draws `f` chips violet). Fable is Claude's: `wf`/`fc` are never sent
   with `pv`, and the Codex screen never draws the strip.
+- Accounts (two or more): `an` (the shown account's short name, ≤ 12
+  ASCII; the device titles it and restarts its rate ring when it changes) and
+  `ap` (`[index, count]`). A peek (swipe, or button preset 7) sends another
+  account's numbers as `rp:1` replays for 30 s (`Engine::peek`).
 - Attention: `b` (alert chime), `m` (ASCII message), `x` (clear).
 - Fast clock: `a` (activity 0–3), `e` + `es` (event `p`/`s`/`b` and its
   sequence), `n` (active sessions). `rp:1` marks the usage numbers as a replay
   (heartbeats and writes between polls): the rate math and reset detector skip
   them, but a new `es` in the same write still fires.
 - Device settings, on every data payload: `k1`/`k2`/`k3` (what the
-  primary, secondary and PWR buttons do: presets 0–6, keyboard shortcuts
+  primary, secondary and PWR buttons do: presets 0–7 (7 = next account), keyboard shortcuts
   and media keys as bit fields, `button_action.h`), `lv` (liveliness 1–5), `aa`
   (attention animation seconds: 120, 30, 10, 0 = off; only his animation,
   not the alert), `pm` (pace marker on the usage bars, `pace.h`), `th`
@@ -122,7 +127,13 @@ The app writes one complete JSON object per write to RX
   `{"dismiss":true}` on TX (`…-0003`) when a tap or the 2-minute timeout ends
   an alert. The app clears its own alert and doesn't echo a clear back. Alerts
   nobody clears expire in the app after 2 minutes (a test alert after 30 s);
-  if the device still shows one, the app sends `x`.
+  if the device still shows one, the app sends `x`. `{"acct":"next"|"prev"}`
+  on TX asks for a peek at another account (a swipe left/right on a touch
+  panel, or the next-account button).
+- Hub: other computers' hooks send their records over HTTP to the app with
+  the device (`hub_listen`/`hub_url`/`hub_token`; `clawdmeter-core::remote`,
+  `clawdmeter-app/src/hub.rs`), which writes them into its own hook files and
+  maps them to an account by sign-in (`identity`), never by folder.
 
 Adding or renaming a key means changing both sides: `clawdmeter-core`'s
 `keys_match_firmware_parser` test cross-checks the app's keys against

@@ -57,6 +57,17 @@ portable archives, and Nix setup.
 </table>
 <p align="center"><sub>Clawdmeter desktop app for flashing and configuring your board</sub></p>
 
+### Several accounts and computers
+
+- **Every account at a glance:** with two or more Claude Code accounts (or Codex), the Overview and the
+  tray list each one's usage, weekly reset and reset credits. The device follows the account you're
+  prompting in and names it in its title ("acme 2/3"); swipe across a touch screen, or press a button
+  set to **Next account**, to peek at the others.
+- **Hooks from other computers:** sessions on another machine reach the board through the app that
+  has it (`hub_listen` there, `hub_url` on the others); see the [user guide](docs/user-guide.md).
+- **Claude's free limit resets** (opt-in, Settings): the resets Anthropic grants each account, with
+  their end dates; Fable-only ones in violet. That one daily read sends Claude Code's own User-Agent.
+
 ---
 
 <a href="https://github.com/notaharness/n10">
