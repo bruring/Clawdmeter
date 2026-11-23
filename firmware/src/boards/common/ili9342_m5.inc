@@ -1,3 +1,63 @@
+// The init lists and the ILI9342C/E probe below are adapted from M5GFX
+// (https://github.com/m5stack/M5GFX): the lists from
+// src/lgfx/v1/panel/Panel_ILI9342.hpp, which comes from LovyanGFX
+// (https://github.com/lovyan03/LovyanGFX), and the probe from
+// src/board_detect/m5/board_registry.inl. Their notices follow.
+//
+// ---- LovyanGFX ----
+// Software License Agreement (FreeBSD License)
+//
+// Copyright (c) 2020 lovyan03 (https://github.com/lovyan03)
+//
+// All rights reserved.
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice, this
+//    list of conditions and the following disclaimer.
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+// ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+// WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+// DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+// ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+// (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+// LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+// ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+// SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// The views and conclusions contained in the software and documentation are those
+// of the authors and should not be interpreted as representing official policies,
+// either expressed or implied, of the FreeBSD Project.
+//
+// ---- M5GFX ----
+// MIT License
+//
+// Copyright (c) 2021 M5Stack
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
 // ILI9342C / ILI9342E bring-up for M5Stack's Core-family panels (FIRE, Core2).
 // Include from a board's display.cpp after board.h and <Arduino_GFX_Library.h>.
 //
@@ -5,8 +65,9 @@
 // unlocks the extended command set (C8h FF 93 42) and sends no gamma tables,
 // so the panel runs on its power-on gamma and looks washed out. These lists
 // are M5GFX's (Panel_ILI9342 and Panel_ILI9342E, m5stack/M5GFX, read
-// 2026-11-23). Later Core2 units carry the ILI9342E, whose command set
-// differs (unlock DDh, gamma E4h/E5h): the C list must not be sent to it.
+// 2026-11-23; notices above). Later Core2 units carry the ILI9342E, whose
+// command set differs (unlock DDh, gamma E4h/E5h): the C list must not be
+// sent to it.
 
 enum Ili9342Variant : uint8_t { ILI9342_VARIANT_UNKNOWN, ILI9342_VARIANT_C, ILI9342_VARIANT_E };
 
