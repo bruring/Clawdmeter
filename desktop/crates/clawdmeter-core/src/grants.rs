@@ -204,12 +204,11 @@ impl GrantsCache {
         std::fs::rename(tmp, path)
     }
 
-    /// `dir` hasn't been asked in [`EVERY_SECS`], or its answer was saved
-    /// before the kinds were (dates without them: asked again once).
+    /// `dir` hasn't been asked in [`EVERY_SECS`]. Nothing else asks
+    /// sooner: an answer without kinds (a grant with no `clears`) waits its
+    /// day like any other.
     pub fn due(&self, dir: &Path, now: i64) -> bool {
-        self.accounts
-            .get(dir)
-            .is_none_or(|e| now - e.asked_at >= EVERY_SECS || e.kinds.chars().count() != e.expiries.len())
+        self.accounts.get(dir).is_none_or(|e| now - e.asked_at >= EVERY_SECS)
     }
 
     /// Note an answer for `dir` at `now`: the grants held, or `None` for
@@ -309,10 +308,10 @@ mod tests {
         let one = ResetCredits { held: 1, expiries: vec![at("2026-12-10T22:00:00Z")], kinds: vec![ResetKind::Fable] };
         c.record(dir, 1_000, Some(&one));
         assert!(!c.due(dir, 1_000 + EVERY_SECS - 1) && c.due(dir, 1_000 + EVERY_SECS));
-        // An answer saved before the kinds were is asked again.
-        let mut old = c.clone();
-        old.accounts.get_mut(dir).unwrap().kinds.clear();
-        assert!(old.due(dir, 1_001));
+        // Kinds unknown (a grant with no `clears`): still once a day.
+        let mut unknown = c.clone();
+        unknown.accounts.get_mut(dir).unwrap().kinds.clear();
+        assert!(!unknown.due(dir, 1_001));
         // A failed ask waits a day too, and keeps the last answer.
         c.touch(dir, 1_000 + EVERY_SECS);
         assert!(!c.due(dir, 1_000 + EVERY_SECS + 60));
