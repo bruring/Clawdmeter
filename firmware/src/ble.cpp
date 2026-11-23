@@ -382,8 +382,7 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
         rx_buf[len] = '\0';
         data_ready = true;
         portEXIT_CRITICAL(&rx_lock);
-        has_received_data = true;
-    }
+        has_received_data = true;    }
 };
 
 // When the app enables notifications on the refresh char, ask for data
@@ -446,6 +445,9 @@ static void gatt_revision_check() {
 
 void ble_init(void) {
     NimBLEDevice::init(DEVICE_NAME);
+    // Room for a whole payload (≤ 500 B) in one ATT write: at NimBLE's default
+    // 255 the app's writes go out as long writes, several round trips each.
+    NimBLEDevice::setMTU(517);
     NimBLEDevice::setSecurityAuth(true, false, true);  // bonding, no MITM, SC
 
     // Restore the locked owner (if any) and drop any stale non-owner bonds so

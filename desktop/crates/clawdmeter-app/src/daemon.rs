@@ -250,6 +250,36 @@ fn poll_codex(dirs: Vec<PathBuf>, mut cache: CodexCache) -> CodexResults {
     (results, cache)
 }
 
+/// The device's next event; never resolves while there is no link, or once
+/// its channel has closed (the link check notices the drop).
+async fn next_device_event(events: &mut Option<DeviceEvents>) -> DeviceEvent {
+    match events {
+        Some(rx) => match rx.recv().await {
+            Some(ev) => ev,
+            None => std::future::pending().await,
+        },
+        None => std::future::pending().await,
+    }
+}
+
+/// Act on one device event (a refresh request, a dismissed alert, a peek).
+fn on_device_event(engine: &mut Engine, ev: DeviceEvent, now: i64) {
+    match ev {
+        DeviceEvent::Refresh => {
+            log::info!("refresh requested by device");
+            engine.request_refresh(now);
+        }
+        DeviceEvent::Dismissed => {
+            log::info!("attention alert dismissed on the device");
+            engine.on_device_dismissed();
+        }
+        DeviceEvent::Account(step) => match engine.peek(step, now) {
+            Some(d) => log::info!("device peeks at {} for {}s", d.display(), clawdmeter_core::engine::PEEK_SECS),
+            None => log::info!("device back on the shown account"),
+        },
+    }
+}
+
 /// The daemon loop. Returns on [`Command::Shutdown`] or when every command
 /// sender is dropped.
 pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, status: watch::Sender<Status>) {
@@ -327,7 +357,12 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
-        ticker.tick().await;
+        // A device event (a swipe asking for another account) runs the tick
+        // at once rather than waiting up to TICK for the next one.
+        let early = tokio::select! {
+            _ = ticker.tick() => None,
+            ev = next_device_event(&mut device_events) => Some(ev),
+        };
         let now = unix_now();
 
         // ---- commands ----
@@ -406,24 +441,12 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         }
 
         // ---- slow clock ----
+        if let Some(ev) = early {
+            on_device_event(&mut engine, ev, now);
+        }
         if let Some(rx) = device_events.as_mut() {
             while let Ok(ev) = rx.try_recv() {
-                match ev {
-                    DeviceEvent::Refresh => {
-                        log::info!("refresh requested by device");
-                        engine.request_refresh(now);
-                    }
-                    DeviceEvent::Dismissed => {
-                        log::info!("attention alert dismissed on the device");
-                        engine.on_device_dismissed();
-                    }
-                    DeviceEvent::Account(step) => match engine.peek(step, now) {
-                        Some(d) => {
-                            log::info!("device peeks at {} for {}s", d.display(), clawdmeter_core::engine::PEEK_SECS)
-                        }
-                        None => log::info!("device back on the shown account"),
-                    },
-                }
+                on_device_event(&mut engine, ev, now);
             }
         }
         if polling.as_ref().is_some_and(JoinHandle::is_finished) {
