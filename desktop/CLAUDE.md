@@ -175,7 +175,11 @@ is faked behind `FlashHardware`.
   under 5 min), before the rise rule. `Engine::peek` (TX `{"acct":"next"|"prev"}`,
   `DeviceEvent::Account`, the `next-account` button preset 7) shows another
   account's numbers as `rp:1` replays for `PEEK_SECS` (30 s); a poll of the
-  shown account waits and goes out as a poll afterwards.
+  shown account waits and goes out as a poll afterwards. Firmware whose acks
+  carry `bg` (`DeviceEvent::Background`) gets each account it isn't showing
+  as a background copy instead (`Engine::next_background_write`: `bg:1`,
+  numbers only, on change and every 5 min, one per tick after the shown
+  account's write) and peeks by itself; a new link starts without.
   `poll_interval`, `heartbeat_interval`,
   `reset_chime` and `alert_chime` (device chimes; the old `chime` / `beep`
   keys are read when these are absent), `desktop_chime` (the same ding on

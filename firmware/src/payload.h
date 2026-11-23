@@ -16,6 +16,7 @@
 //   a   activity level 0-3 (clamped)          e   latest event, first char used
 //   es  event sequence number (uint32)        n   active sessions (clamped 0..999)
 //   rp  1 = usage numbers are a replay        lv  liveliness 1-5 (clamped), -1 absent
+//   bg  1 = another account's numbers, kept for a swipe (account_cache.h)
 //   aa  attention animation seconds 0-120 (clamped, 0 = off), -1 absent
 //   pm  pace marker on the usage bars, 1 on / 0 off, -1 absent
 //   k1  PRIMARY button action, k2 SECONDARY, k3 PWR short press

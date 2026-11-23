@@ -52,6 +52,8 @@ struct UsageData {
     int16_t  sessions;       // `n`  sessions with a hook event in the last 5 min; -1 = absent
     bool     replay;         // `rp` 1 = the usage numbers repeat the last poll;
                              //      the rate math and reset detection skip it
+    bool     background;     // `bg` 1 = another of the app's accounts, to keep for
+                             //      a swipe (account_cache.h), not to show
     int8_t   liveliness;     // `lv` 1-5 (clamped); -1 = absent (keep the saved level)
     int16_t  attn_anim_s;    // `aa` attention animation, seconds 0-120 (0 = off); -1 = absent
     int8_t   pace_marker;    // `pm` 1 = pace marker on the usage bars, 0 = off; -1 = absent

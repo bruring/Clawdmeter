@@ -22,6 +22,7 @@
 #include "clawd_prefs.h"
 #include "perf.h"
 #include "pair_hold.h"
+#include "account_cache.h"
 
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
@@ -34,6 +35,59 @@
 #include "hal/board_info_hal.h"
 
 static UsageData usage = {};
+
+// ---- Another account on a swipe (account_cache.h) ----
+// With the app sending its other accounts in the background (`bg:1`), a
+// swipe or the next-account button shows the next one at once, here, for
+// PEEK_MS after the last swipe. The shown account's payloads keep coming
+// and drive everything else (Clawd, alerts, the stale timer); only the
+// numbers on the meters are the other account's. Without background
+// payloads this connection (an older app) the swipe asks the app instead.
+// The app refreshes its copies every 5 minutes: none for longer means
+// it stopped (an older app on the same link), so the swipe asks again.
+#define PEEK_MS 30000
+#define BG_TRUST_MS (15UL * 60UL * 1000UL)
+static bool      bg_seen = false;    // a `bg` payload came on this connection
+static uint32_t  bg_last_ms = 0;     // when the last one came
+static int       peek_idx = -1;      // the `ap` index on show instead of the shown account's
+static uint32_t  peek_until = 0;
+static UsageData shown_ok = {};      // the shown account's last payload with numbers
+
+static bool show_peek(bool fresh) {
+    UsageData v = shown_ok;
+    if (!v.valid || !account_cache_overlay(&v, peek_idx, millis())) return false;
+    ui_update(&v, fresh);
+    return true;
+}
+
+// Back to the shown account's numbers (its last ones, even when the
+// payload that ends the peek has none).
+static void end_peek(void) {
+    if (peek_idx < 0) return;
+    peek_idx = -1;
+    if (shown_ok.valid) ui_update(&shown_ok, false);
+}
+
+static void account_step(int step) {
+    const int shown = usage.account_idx;
+    const int from = peek_idx >= 0 ? peek_idx : shown;
+    const bool kept = bg_seen && (millis() - bg_last_ms) < BG_TRUST_MS && usage.valid && usage.ok && shown >= 0 &&
+                      usage.account_count <= ACCOUNT_CACHE_SLOTS;
+    const int next = kept ? account_cache_next(from, step) : -1;
+    if (next < 0) {
+        ble_send_account(step);   // nothing kept: the app peeks
+        return;
+    }
+    if (next == shown) {
+        end_peek();
+        Serial.println("accounts: back to the shown one");
+        return;
+    }
+    peek_idx = next;
+    peek_until = millis() + PEEK_MS;
+    if (!show_peek(false)) end_peek();
+    else Serial.printf("accounts: showing #%d (kept)\n", next);
+}
 
 // ---- LVGL draw buffers (partial render mode) ----
 // PSRAM-equipped boards (S3) can comfortably hold larger strips. PSRAM-free
@@ -204,7 +258,8 @@ static void check_serial_cmd() {
                 }
             }
             else if (strcmp(cmd_buf, "info") == 0)  send_info();
-            else if (strcmp(cmd_buf, "perf") == 0)  perf_print();            else if (strcmp(cmd_buf, "ble") == 0) ble_print_status();
+            else if (strcmp(cmd_buf, "perf") == 0)  perf_print();
+            else if (strcmp(cmd_buf, "ble") == 0) ble_print_status();
             else if (strcmp(cmd_buf, "disconnect") == 0) ble_disconnect_all();
             else if (strcmp(cmd_buf, "unpair") == 0) {
                 clear_pairing("serial");
@@ -438,7 +493,7 @@ static void button_run_press(ButtonSlot slot, ButtonRun* r, int32_t action, bool
         brightness_cycle();
         break;
     case BTN_KIND_NEXT_ACCOUNT:
-        ble_send_account(1);
+        account_step(1);
         break;
     default:
         break;
@@ -475,7 +530,8 @@ void loop() {
     mascot_tick();
     director_tick();
     if (director_take_dismissed()) ble_send_dismiss();
-    if (const int step = director_take_swipe()) ble_send_account(step);
+    if (const int step = director_take_swipe()) account_step(step);
+    if (peek_idx >= 0 && (int32_t)(millis() - peek_until) >= 0) end_peek();
     // Rotation transition (blank + ramp) would fight the idle fade — skip
     // ticks while the panel is dark. A rotation that happens during sleep
     // is detected by the next tick after wake and ramped in then.
@@ -561,6 +617,12 @@ void loop() {
     ble_state_t bs = ble_get_state();
     if (bs != last_ble_state) {
         last_ble_state = bs;
+        if (bs != BLE_STATE_CONNECTED) {
+            // The next app may not send its accounts: forget them.
+            bg_seen = false;
+            account_cache_clear();
+            end_peek();
+        }
         ui_update_ble_status(bs, ble_get_device_name(), ble_get_mac_address());
     }
 
@@ -580,7 +642,21 @@ void loop() {
 
     check_serial_cmd();
 
-    if (ble_has_data()) {        if (parse_json(ble_get_data(), &usage)) {
+    static UsageData in;
+    if (!ble_has_data()) {
+        // nothing came
+    } else if (!parse_json(ble_get_data(), &in)) {
+        ble_send_nack();
+    } else if (in.background) {
+        // Another account, kept for a swipe; nothing else reads it.
+        bg_seen = true;
+        bg_last_ms = millis();
+        account_cache_store(&in, millis());
+        if (peek_idx >= 0 && peek_idx == in.account_idx) show_peek(false);
+        ble_send_ack();
+    } else {
+        usage = in;
+        {
             // Fast + slow clock bookkeeping: rate sample (replays skipped),
             // hook activity lift, event dedupe. See signals.h.
             const SignalsUpdate sig = signals_ingest(&usage);
@@ -610,7 +686,10 @@ void loop() {
             if (usage.btn_pwr >= 0)       button_action_set(BTN_SLOT_PWR, usage.btn_pwr);
             if (usage.has_theme) theme_set(usage.theme);
             if (usage.has_fable_color) fable_color_set(usage.fable_color);
-            ui_update(&usage);
+            if (usage.ok) shown_ok = usage;
+            account_cache_store(&usage, millis());
+            if (peek_idx >= 0 && (!usage.ok || usage.account_idx == peek_idx || !show_peek(true))) end_peek();
+            if (peek_idx < 0) ui_update(&usage);
             // A prompt (or you're back after a gap): you're at the computer,
             // so a dimmed or dark panel wakes before Clawd notices you. A
             // Stop or tool activity doesn't: Claude working alone isn't you.
@@ -629,8 +708,6 @@ void loop() {
                 Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
                     g_before, g_after, usage.session_pct);
             ble_send_ack();
-        } else {
-            ble_send_nack();
         }
     }
 

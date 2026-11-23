@@ -21,7 +21,8 @@ pins and hardware gotchas, which loads when you work in that folder.
   → `signals.cpp` (fast clock: activity, events, sessions; feeds
   `usage_rate.cpp`, the slow clock that turns a 15-min window of real samples
   into Idle/Normal/Active/Heavy) → the director. Buttons and serial commands
-  are in `main.cpp` too.
+  are in `main.cpp` too. The app's other accounts arrive as `bg:1` copies
+  into `account_cache.cpp`; a swipe shows one from there (`account_step`).
 - **Clawd**: `clawd_director.cpp` owns the rooms and runs the beats;
   `clawd_policy.cpp` holds the pure rules and every timing (`ClawdTuning`,
   `clawd_tuning_fast()` under `SIM_FAST`). There is no separate stage:

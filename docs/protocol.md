@@ -38,6 +38,19 @@ request, round the list of accounts with numbers, and goes back to the shown
 account after that or when a step lands on it. A peek never changes the account the app
 shows, and never reaches the device's rate math.
 
+Firmware that keeps the app's other accounts says so in its write acks:
+`{"ack":true,"bg":1}` on TX. The app then also writes each account the device
+isn't showing as a background copy, `{…usage keys…,"rp":1,"bg":1,"an":…,"ap":[i,n]}`
+(numbers only: no settings, clock, events or alerts), once, again when its
+numbers, name or place change, and every 5 minutes. A new link starts
+without, until an ack says `bg`. The device keeps the copies by `ap` index
+(`account_cache.h`; a new count empties them) and then peeks by itself: a
+swipe or the next-account button shows the next kept account at once, its
+reset countdowns run down by the time since the copy came, for 30 seconds
+after the last swipe, and sends no `acct` request. The shown account's
+writes keep driving everything else meanwhile. With no background copy on
+this connection (an older app) it asks the app as above.
+
 ```json
 {"s":45,"sr":120,"w":28,"wr":7200,"st":"allowed","acct":"pro","ok":true,"a":2,"e":"p","es":14,"n":1}
 ```
@@ -65,6 +78,7 @@ A Codex account (a $100 Pro plan: weekly window only, reset credits):
 | `b`, `m`, `x` | Attention: alert chime, message (ASCII), end the alert. The app sends a fixed line per alert kind in `m`: `Question for you`, `Permission needed!` (also for other notification types), `Waiting for you!` (idle) or `MCP request!`; the test alert sends `Clawdmeter test alert`. The firmware shows whatever `m` it gets. |
 | `a`, `e`, `es`, `n` | Fast clock: activity 0–3, latest hook event (`p` prompt, `s` stop, `b` back after a gap) and its sequence number, active sessions. |
 | `rp` | `1` = the usage numbers are a replay, not a fresh poll (heartbeats, and writes between polls for an event, `a`/`n` change, alert, setting or a switch to another account's numbers read earlier); the rate math and reset detection skip them. Fast-clock fields in the same write still count: a new `es` fires. |
+| `bg` | `1` = a background copy of an account the device isn't showing (above): kept for a swipe, never shown as it arrives, never fed to the rate math. Only sent to firmware whose acks carry `bg`. |
 | `lv` | How lively Clawd is, `1` (No-nonsense) to `5` (All-nonsense); `3` is the default. Sent with every data payload and right away when the setting changes. The device stores the last value in NVS, so it applies from boot before the app connects; absent = keep the stored value. |
 | `aa` | How long Clawd points and waves for an alert, in seconds: `120` (the default, the whole alert), `30`, `10`, or `0` = no animation. Only the animation: the alert's message, tap, `x`, timeout and dismiss notify are unchanged. Sent like `lv` and stored the same way (clamped to 0–120); absent = keep the stored value. |
 | `pm` | Pace marker: `1` draws a line on the session and weekly bars at the elapsed share of each window (5 hours, 7 days) and colours the fill by pace (green at or behind it, amber ahead, red at 100%); `0` keeps the plain 50/80% colours. A bar with no reset time (`sr`/`wr` = -1) and spend-capped accounts keep the plain colours. Sent like `lv` and stored the same way; absent = keep the stored value. |

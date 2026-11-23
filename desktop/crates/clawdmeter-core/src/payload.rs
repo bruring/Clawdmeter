@@ -105,6 +105,11 @@ pub struct Payload {
     /// the same write still count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rp: Option<u8>,
+    /// 1 = another account's numbers for the device to keep for a swipe, not
+    /// to show ([`crate::engine::Engine::next_background_write`]). Sent
+    /// only to firmware whose acks say it keeps them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bg: Option<u8>,
     /// How lively Clawd is, 1 (No-nonsense) to 5 (All-nonsense). The device
     /// keeps the last value it got across reboots.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -152,7 +157,7 @@ pub struct Payload {
 /// Every key [`Payload`] can emit, in serialization order.
 pub const PAYLOAD_KEYS: &[&str] = &[
     "s", "sr", "w", "wr", "wf", "st", "acct", "pv", "rc", "rx", "rf", "tp", "pd", "rd", "t", "tf", "c", "ok", "b", "m",
-    "x", "a", "e", "es", "n", "rp", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc", "an", "ap",
+    "x", "a", "e", "es", "n", "rp", "bg", "lv", "aa", "pm", "k1", "k2", "k3", "th", "fc", "an", "ap",
 ];
 
 /// The fast-clock keys added in v0.4 (old firmware ignores them).
@@ -691,6 +696,8 @@ mod tests {
             es: Some(u32::MAX),
             n: Some(99),
             rp: Some(1),
+            // A background copy (`bg`) carries no settings, clock or events.
+            bg: None,
             lv: Some(5),
             aa: Some(120),
             pm: Some(1),
@@ -745,6 +752,7 @@ mod tests {
             es: Some(7),
             n: Some(1),
             rp: Some(1),
+            bg: Some(1),
             lv: Some(3),
             aa: Some(120),
             pm: Some(1),

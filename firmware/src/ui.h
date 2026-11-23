@@ -7,7 +7,9 @@
 // to the director (clawd_director.h); ui only draws the meters.
 
 void ui_init(void);
-void ui_update(const UsageData* data);
+// fresh = false redraws without counting as new data (a swipe's cached
+// account, or back from one): the stale timer and the title clock keep going.
+void ui_update(const UsageData* data, bool fresh = true);
 // Pace marker on the Pro/Max usage bars (`pm`, pace.h); redraws the last data.
 void ui_set_pace_marker(bool on);
 void ui_apply_theme(void);          // repaint everything in the live palette (theme_palette.h)

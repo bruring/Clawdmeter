@@ -108,7 +108,10 @@ The app writes one complete JSON object per write to RX
 - Accounts (two or more): `an` (the shown account's short name, ≤ 12
   ASCII; the device titles it and restarts its rate ring when it changes) and
   `ap` (`[index, count]`). A peek (swipe, or button preset 7) sends another
-  account's numbers as `rp:1` replays for 30 s (`Engine::peek`).
+  account's numbers as `rp:1` replays for 30 s (`Engine::peek`). Firmware
+  whose acks carry `bg` (`{"ack":true,"bg":1}`) gets every other account
+  as a background copy (`bg:1`, `Engine::next_background_write`), keeps them
+  (`account_cache.h`) and peeks by itself, with no round trip.
 - Attention: `b` (alert chime), `m` (ASCII message), `x` (clear).
 - Fast clock: `a` (activity 0–3), `e` + `es` (event `p`/`s`/`b` and its
   sequence), `n` (active sessions). `rp:1` marks the usage numbers as a replay

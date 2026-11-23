@@ -112,6 +112,7 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
         d.sessions = (int16_t)(v < 0 ? 0 : v > 999 ? 999 : v);
     }
     d.replay = doc["rp"].as<bool>();
+    d.background = doc["bg"].as<bool>();
     JsonVariant lv = doc["lv"];
     if (lv.isNull()) {
         d.liveliness = -1;

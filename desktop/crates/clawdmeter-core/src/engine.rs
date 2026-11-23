@@ -211,6 +211,10 @@ pub struct Engine {
     peek: Option<(PathBuf, i64)>,
     /// The peek moved and the device hasn't got it yet.
     peek_dirty: bool,
+    /// The device keeps the other accounts for a swipe (its acks carry `bg`).
+    device_bg: bool,
+    /// Each background copy last sent: its reading, name, place, and when.
+    bg_sent: HashMap<PathBuf, (UsageReading, String, [u32; 2], i64)>,
     /// Short names for the accounts that have one (the sign-in's email
     /// domain), for `an`.
     labels: Vec<(PathBuf, String)>,
@@ -218,6 +222,24 @@ pub struct Engine {
 
 /// How long a peek at another account lasts without another swipe.
 pub const PEEK_SECS: i64 = 30;
+
+/// How often an unchanged background copy goes out again, so a long-kept
+/// one stays close (the device also runs its reset countdowns down).
+pub const BACKGROUND_REFRESH_SECS: i64 = 300;
+
+/// The most accounts the firmware keeps (`ACCOUNT_CACHE_SLOTS`); with more
+/// it asks for each peek, so no copies go out.
+pub const BACKGROUND_MAX_ACCOUNTS: u32 = 8;
+
+/// An account the device isn't showing, for it to keep so a swipe there
+/// shows it at once ([`Engine::next_background_write`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct BackgroundWrite {
+    /// Whose numbers.
+    pub account: PathBuf,
+    /// `bg:1` and `rp:1`, with its `an`/`ap`; no settings, clock or events.
+    pub payload: Payload,
+}
 
 /// The account's name on the device (`an`): the first part of its short
 /// name ("acme" from "acme.ai", "globex" from "globex-inc.com"), else its folder without the leading
@@ -286,6 +308,8 @@ impl Engine {
             now_seen: 0,
             peek: None,
             peek_dirty: false,
+            device_bg: false,
+            bg_sent: HashMap::new(),
             labels: Vec::new(),
         }
     }
@@ -366,6 +390,53 @@ impl Engine {
                 self.end_peek();
                 None
             }
+        }
+    }
+
+    /// The device keeps (`true`) or doesn't keep the other accounts: its
+    /// acks say `bg`, and a new link starts without. A change resends every
+    /// copy. Returns whether it changed.
+    pub fn set_device_background(&mut self, on: bool) -> bool {
+        if self.device_bg == on {
+            return false;
+        }
+        self.device_bg = on;
+        self.bg_sent.clear();
+        true
+    }
+
+    /// The next account the device isn't showing whose copy there is
+    /// missing, out of date (new numbers, name or place) or older than
+    /// [`BACKGROUND_REFRESH_SECS`]. Only for firmware that keeps them, and
+    /// only accounts with numbers (no data is never sent as a zero).
+    pub fn next_background_write(&self, now: i64) -> Option<BackgroundWrite> {
+        if !self.device_bg || self.logged_out {
+            return None;
+        }
+        self.settings.accounts().map(|(d, _)| d).filter(|d| self.active.as_ref() != Some(*d)).find_map(|d| {
+            let reading = self.accounts.get(d)?.last.as_ref()?;
+            let (an, ap) = self.account_key(d)?;
+            let ap = ap.filter(|[_, n]| *n <= BACKGROUND_MAX_ACCOUNTS)?;
+            let current = self.bg_sent.get(d).is_some_and(|(r, n, p, at)| {
+                r == reading && *n == an && *p == ap && now - at < BACKGROUND_REFRESH_SECS
+            });
+            if current {
+                return None;
+            }
+            let mut payload = Payload::from_reading(reading, utc(now));
+            payload.rp = Some(1);
+            payload.bg = Some(1);
+            payload.an = Some(an);
+            payload.ap = Some(ap);
+            Some(BackgroundWrite { account: d.clone(), payload })
+        })
+    }
+
+    /// The copy from [`Engine::next_background_write`] reached the device.
+    pub fn mark_background_written(&mut self, now: i64, w: &BackgroundWrite) {
+        let reading = self.accounts.get(&w.account).and_then(|a| a.last.clone());
+        if let (Some(r), Some(an), Some(ap)) = (reading, w.payload.an.clone(), w.payload.ap) {
+            self.bg_sent.insert(w.account.clone(), (r, an, ap, now));
         }
     }
 
@@ -2086,6 +2157,36 @@ mod tests {
     // numbers as replays with its `an`/`ap`, never moves the shown account,
     // keeps a poll of it waiting, and ends after PEEK_SECS or on a step past
     // the end. A prompt moves the automatic choice to its account.
+    // Firmware that keeps the other accounts (`bg` in its acks) gets each
+    // account it isn't showing once, again on new numbers or after
+    // BACKGROUND_REFRESH_SECS, never the shown one; older firmware none.
+    #[test]
+    fn background_copies() {
+        let mut e = Engine::new(settings(TWO));
+        let (a, b) = two();
+        e.on_poll_results(T0, vec![(a.clone(), Ok(reading(10))), (b.clone(), Ok(reading(30)))]);
+        write(&mut e, T0).unwrap();
+        assert!(e.next_background_write(T0).is_none(), "firmware that doesn't keep them");
+        assert!(e.set_device_background(true));
+        let w = e.next_background_write(T0).unwrap();
+        let p = &w.payload;
+        assert_eq!(
+            (&w.account, p.bg, p.rp, p.s, p.an.as_deref(), p.ap, p.th.is_none() && p.a.is_none()),
+            (&a, Some(1), Some(1), Some(10), Some("claude"), Some([0, 2]), true),
+            "the account not shown, numbers only"
+        );
+        e.mark_background_written(T0, &w);
+        assert!(e.next_background_write(T0 + 1).is_none(), "already there");
+        e.on_poll_results(T0 + 60, vec![(a.clone(), Ok(reading(9)))]);
+        let w = e.next_background_write(T0 + 60).unwrap();
+        assert_eq!(w.payload.s, Some(9), "new numbers");
+        e.mark_background_written(T0 + 60, &w);
+        assert!(e.next_background_write(T0 + 59 + BACKGROUND_REFRESH_SECS).is_none());
+        assert!(e.next_background_write(T0 + 60 + BACKGROUND_REFRESH_SECS).is_some(), "refreshed");
+        assert!(e.set_device_background(false));
+        assert!(e.next_background_write(T0 + 1000).is_none(), "a new link starts without");
+    }
+
     #[test]
     fn peeks_and_prompts() {
         let mut e = Engine::new(settings(TWO));

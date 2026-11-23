@@ -398,13 +398,17 @@ pub enum DeviceEvent {
     /// TX `{"acct":"next"}` (1) or `{"acct":"prev"}` (-1): a swipe or the
     /// next-account button asks to see another account.
     Account(i32),
+    /// TX ack with `"bg":1`: the firmware keeps the other accounts for a
+    /// swipe, so the app sends them in the background.
+    Background,
 }
 
 /// The device's events, in order.
 pub type DeviceEvents = mpsc::UnboundedReceiver<DeviceEvent>;
 
 /// Read one notification. TX also carries the write acks
-/// (`{"ack":true}` / `{"err":true}`), which mean nothing here.
+/// (`{"ack":true}` / `{"err":true}`); one with `"bg":1` is
+/// [`DeviceEvent::Background`].
 pub fn device_event(uuid: Uuid, value: &[u8]) -> Option<DeviceEvent> {
     if uuid == REQ_UUID {
         return Some(DeviceEvent::Refresh);
@@ -419,7 +423,10 @@ pub fn device_event(uuid: Uuid, value: &[u8]) -> Option<DeviceEvent> {
     if text.contains("\"acct\":\"prev\"") {
         return Some(DeviceEvent::Account(-1));
     }
-    text.contains("\"dismiss\":true").then_some(DeviceEvent::Dismissed)
+    if text.contains("\"dismiss\":true") {
+        return Some(DeviceEvent::Dismissed);
+    }
+    text.contains("\"bg\":1").then_some(DeviceEvent::Background)
 }
 
 /// An open GATT link.
@@ -875,6 +882,8 @@ mod tests {
         assert_eq!(device_event(TX_UUID, br#"{"err":true}"#), None);
         assert_eq!(device_event(TX_UUID, br#"{"acct":"next"}"#), Some(DeviceEvent::Account(1)));
         assert_eq!(device_event(TX_UUID, br#"{ "acct": "prev" }"#), Some(DeviceEvent::Account(-1)));
+        assert_eq!(device_event(TX_UUID, br#"{"ack":true,"bg":1}"#), Some(DeviceEvent::Background));
+        assert_eq!(device_event(TX_UUID, br#"{"ack":true}"#), None);
         assert_eq!(device_event(TX_UUID, &[0xff, 0xfe]), None);
         assert_eq!(device_event(RX_UUID, br#"{"dismiss":true}"#), None);
         // The firmware's reply, as written.

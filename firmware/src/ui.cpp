@@ -1013,16 +1013,20 @@ void ui_apply_theme(void) {
     }
 }
 
-void ui_update(const UsageData* data) {
+void ui_update(const UsageData* data, bool fresh) {
     if (!data->valid) return;
     data_ok = data->ok;
     if (!data->ok) return;          // a {"ok":false} "no data" beat → fall through to idle, keep last numbers
     last_data = *data;
     have_last_data = true;
-    last_data_ms = lv_tick_get();   // a real usage update just landed
-    data_received = true;
+    if (fresh) {
+        last_data_ms = lv_tick_get();   // a real usage update just landed
+        data_received = true;
+    }
 
-    if (data->clock_epoch > 0) {    // daemon supplied wall-clock time → drive the title clock
+    if (!fresh) {
+        // A redraw from what's kept: the clock runs on as it was.
+    } else if (data->clock_epoch > 0) {    // daemon supplied wall-clock time → drive the title clock
         if (clock_fmt != data->clock_fmt) clock_last_min = -1;
         clock_base_epoch = data->clock_epoch;
         clock_base_ms = last_data_ms;

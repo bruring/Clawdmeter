@@ -382,7 +382,8 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
         rx_buf[len] = '\0';
         data_ready = true;
         portEXIT_CRITICAL(&rx_lock);
-        has_received_data = true;    }
+        has_received_data = true;
+    }
 };
 
 // When the app enables notifications on the refresh char, ask for data
@@ -620,7 +621,9 @@ const char* ble_get_data(void) {
 
 void ble_send_ack(void) {
     if (state == BLE_STATE_CONNECTED && tx_char) {
-        tx_char->setValue("{\"ack\":true}");
+        // `bg`: this firmware keeps the app's other accounts for a swipe,
+        // so the app may send them in the background (`bg:1` payloads).
+        tx_char->setValue("{\"ack\":true,\"bg\":1}");
         tx_char->notify();
     }
 }

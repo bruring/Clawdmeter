@@ -262,7 +262,8 @@ async fn next_device_event(events: &mut Option<DeviceEvents>) -> DeviceEvent {
     }
 }
 
-/// Act on one device event (a refresh request, a dismissed alert, a peek).
+/// Act on one device event (a refresh request, a dismissed alert, a peek,
+/// the firmware keeping the other accounts).
 fn on_device_event(engine: &mut Engine, ev: DeviceEvent, now: i64) {
     match ev {
         DeviceEvent::Refresh => {
@@ -277,6 +278,11 @@ fn on_device_event(engine: &mut Engine, ev: DeviceEvent, now: i64) {
             Some(d) => log::info!("device peeks at {} for {}s", d.display(), clawdmeter_core::engine::PEEK_SECS),
             None => log::info!("device back on the shown account"),
         },
+        DeviceEvent::Background => {
+            if engine.set_device_background(true) {
+                log::info!("device keeps the other accounts: sending them in the background");
+            }
+        }
     }
 }
 
@@ -364,6 +370,13 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             ev = next_device_event(&mut device_events) => Some(ev),
         };
         let now = unix_now();
+        // A write's ack (`bg`) only notes what the firmware keeps: a tick
+        // for it could write again before the device has read the last write,
+        // and the device keeps one at a time.
+        if early == Some(DeviceEvent::Background) {
+            on_device_event(&mut engine, DeviceEvent::Background, now);
+            continue;
+        }
 
         // ---- commands ----
         loop {
@@ -598,6 +611,8 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     link_state = LinkState::Connected { key: l.key().to_owned(), name: l.name().map(str::to_owned) };
                     link = Some(l);
                     device_events = Some(rx);
+                    // Until its acks say otherwise (firmware may have changed).
+                    engine.set_device_background(false);
                     reconnect.connected();
                     inbox.reset();
                     engine.on_connected();
@@ -677,6 +692,15 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                             reconnect.retry_in(now, 2);
                         }
                     }
+                }
+            } else if let Some(bw) = engine.next_background_write(now) {
+                // An account the device isn't showing, kept there for a swipe;
+                // one per tick, after anything the shown account needs.
+                let bytes = bw.payload.encode(MAX_WRITE);
+                log::debug!("Background: {}", String::from_utf8_lossy(&bytes));
+                match l.write(&bytes).await {
+                    Ok(()) => engine.mark_background_written(now, &bw),
+                    Err(e) => log::warn!("background write failed: {e}"),
                 }
             }
         }
