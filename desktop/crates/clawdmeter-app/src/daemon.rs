@@ -548,12 +548,16 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                         }
                         // Asked again once Claude Code has renewed it.
                         Err(usage::UsageError::TokenExpired) => {}
-                        // A miss (a 429 included) backs the account off like a
-                        // poll's would, so nothing calls a blocked endpoint again.
+                        // Any other miss waits a day. A 429 also parks the
+                        // account like a poll's would (it's the same endpoint),
+                        // so nothing calls a blocked endpoint again; a network
+                        // blip or a refused token doesn't hold up its polls.
                         Err(e) => {
                             log::warn!("{}: limit-reset grants: {e}; asking again in a day", d.display());
                             grants.touch(&d, at);
-                            engine.on_endpoint_miss(&d, &e, at);
+                            if matches!(e, usage::UsageError::Throttled { .. }) {
+                                engine.on_endpoint_miss(&d, &e, at);
+                            }
                         }
                     }
                 }
